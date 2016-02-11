@@ -1,0 +1,14 @@
+{
+	"images": [],
+	"video": "",
+	"short_description": "Schedule recurring file imports: Inventory and Product.",
+	"html_description": "<p style=\"margin: 0px 0px 8px; text-overflow: ellipsis; word-wrap: break-word; color: rgb(77, 77, 77); font-family: 'Helvetica Neue', Arial, Helvetica, sans-serif; font-size: 14px; font-style: normal; font-variant: normal; letter-spacing: normal; line-height: 18px; orphans: auto; text-align: start; text-indent: 0px; text-transform: none; white-space: normal; widows: 1; word-spacing: 0px; -webkit-text-stroke-width: 0px; background-color: rgb(255, 255, 255);\"><b>Setup Instructions:<\/b><\/p><ol><li><b>File Location (URL)<\/b>: Enter the URL where your Comma Delimited (CSV) file is located, eg. https:\/\/www.domain.com\/inventory.csv<\/li><li><b>Model Type<\/b>: Select the import model of your file.<\/li><li><b>Match by Field<\/b>: Enter the primary field in your file, eg. sku<\/li><li><b>Frequency<\/b>: Acenda will pull your file every 15 minutes.<\/li><\/ol><!--EndFragment--><p><br\/><\/p><p><br\/><\/p>",
+	"json_credentials_description": "{\"file_url\":{\"type\":\"string\",\"label\":\"File Location (URL)\"},\"import_type\":{\"type\":\"select\",\"label\":\"Model Type\",\"values\":[\"Inventory\",\"Variant\",\"Product\"]},\"match\":{\"type\":\"string\",\"label\":\"Match by Field\"}}",
+	"status": "validated",
+	"application_status": "active",
+	"client_id": "PLUGIN_CLIENT_ID@acenda.com",
+	"schema_add": "{}",
+	"keywords": [],
+	"name": "Recurring Imports",
+	"rights": ["products:write", "products:read", "settings:read"]
+}

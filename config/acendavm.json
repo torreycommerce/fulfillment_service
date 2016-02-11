@@ -1,0 +1,12 @@
+{
+    "acenda": {
+        "credentials": {
+            "client_id": "572d5f0dbc4a4decb065810e0ed47af7@acenda.com",
+            "client_secret": "731635ab14d15116f86d9c8d91d6d94e"
+        },
+	"service":{
+	    "id": 1
+	}
+    }
+}
+

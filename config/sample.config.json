@@ -1,0 +1,12 @@
+{
+    "acenda": {
+        "credentials": {
+            "client_id": "",
+            "client_secret": ""
+        }
+    },
+    "shipstation": {
+        "endpoint": "https://ssapi.shipstation.com/"
+    }
+}
+
