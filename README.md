@@ -1,5 +1,5 @@
-# Recurring Imports
-# (Acenda URL Based Import Service)
+# Fulfillment Service
+# (Acenda Fulfillment Service)
 
 ![enter image description here](https://acenda.com/images/logo-acenda@2x.png)
 
@@ -7,7 +7,7 @@
 
 ## Description
 
-This service allows a user to schedule an import or an update from a URL.
+This service allows a user to schedule files to be downloaded and to be processed for the fulfillment of orders
 
 As of now, the file can either be a CSV (Comma separated file), a ZIP (Compressed file) or a GZIP (Compressed file).
 
