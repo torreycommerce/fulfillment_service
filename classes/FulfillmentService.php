@@ -5,7 +5,7 @@ require_once(__DIR__ . "/Template.php");
 require_once(__DIR__ . "/Couchbase/LastRunTime.php");
 require_once (__DIR__ . "/Lock.php");
 
-class RecurringImport {
+class FulfillmentService {
     private $logger;
     private $configs;
     private $subscriber;
@@ -19,7 +19,7 @@ class RecurringImport {
 
     public function __construct($configs, $logger, $couchbaseCluster) {
         $this->configs = $configs;
-        echo "Reccuring import ".date("Y-m-d H:i:s")." - {$this->configs['acenda']['store']['name']}\n";
+        echo "Shipping ".date("Y-m-d H:i:s")." - {$this->configs['acenda']['store']['name']}\n";
         $this->logger = $logger;
         $this->service_id = $this->configs['acenda']['service']['id'];
         $this->store_id = $this->configs['acenda']['store']['id'];
