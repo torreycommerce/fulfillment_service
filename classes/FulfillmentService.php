@@ -1,15 +1,11 @@
 <?php
-require_once(__DIR__ . "/Transport.php");
-require_once(__DIR__ . "/AcendaModels.php");
-require_once(__DIR__ . "/Template.php");
 require_once(__DIR__ . "/Couchbase/LastRunTime.php");
-require_once (__DIR__ . "/Lock.php");
+use phpseclib\Net\SFTP;
 
 class FulfillmentService {
     private $logger;
     private $configs;
     private $subscriber;
-    private $models;
     private $subscription;
     private $acenda;
     private $errors = [];
@@ -32,11 +28,6 @@ class FulfillmentService {
         $this->lastRunTime = new lastRunTime(   $this->store_id,
                                                 $couchbaseCluster
                                             );
-        $this->models = new AcendaModels(
-                                            $this->configs['acenda']['credentials']['client_id'],
-                                            $this->configs['acenda']['credentials']['client_secret'],
-                                            $this->store_name
-                                        );
         $this->subscription = $this->configs["acenda"]["subscription"];
         if(empty($this->configs["acenda"]["subscription"])) {
             echo "We weren't able to retrieve the subscriber's config.\n";
@@ -57,45 +48,20 @@ class FulfillmentService {
         echo "Config:\n";
         var_dump($this->configs);
         echo "\n";
-
-        switch (strtolower($this->configs['acenda']['subscription']['credentials']['import_type'])) {
-            case "inventory":
-            case "variant":
-                $this->model = "Variant";
-                break;
-            default:
-                $this->model = "ProductImport";
-                break;
+        $prefix = $this->configs['acenda']['subscription']['credentials']['file_prefix'];
+        $files = $this->getFileList();
+        if(is_array($files)) {
+            foreach($files as $file) {
+               if($prefix && substr($file,0,strlen($prefix))!=$prefix) continue;
+               if(strtolower(pathinfo($file, PATHINFO_EXTENSION))!== 'csv') continue;
+               echo "getting ". $file . "\n";
+               $this->getFile($file);               
+            }
         }
-        $this->getFile();
         $this->handleErrors();
 
         echo "End LastRunTime: ".date("Y-m-d H:i:s", LastRunTime::getCurrentTimestamp())."\n\n";
         $this->lastRunTime->setDatetime('lastTime', LastRunTime::getCurrentTimestamp());
-    }
-    private function processHeaders($token){
-        $headers = $this->acenda->get("/import/headers/".$token, []);
-        if ($headers->code == 200){
-            $headers = $headers->body->result;
-            $import = [];
-            if(!isset($this->configs['acenda']['subscription']['credentials']['match'])) {
-                $this->configs['acenda']['subscription']['credentials']['match'] = '';
-            }
-
-            if ($this->configs['acenda']['subscription']['credentials']['match'] == "" || in_array($this->configs['subscription']['credentials']['match'], $headers->headers)){
-                foreach($headers->headers as $field){
-                    $data = ['name' => $field];
-                    if ( strtolower($this->configs['acenda']['subscription']['credentials']['match']) == $field){ $data['match'] = true; }
-                    $import[$field] = $data;
-                }
-                $return = $this->acenda->post("/import/queue/".$token, [
-                    'import' => $import
-                ]);
-            }else{
-                array_push($this->errors, "The field to match (".$this->configs['acenda']['subscription']['credentials']['match'].") does not exist in the CSV file.");
-                $this->logger->addError("The field to match (".$this->configs['acenda']['subscription']['credentials']['match'].") does not exist in the CSV file.");
-            }
-        }
     }
 
     private function generateUrl(){
@@ -113,41 +79,37 @@ class FulfillmentService {
         }
         return $url."/preview/".md5($this->configs['acenda']['store']['name'])."/api/import/upload?access_token=".Acenda\Authentication::getToken();
     }
-    private function processImport(){
-        // initialise the curl request
-        $request = curl_init($this->generateUrl());
+    private function processFile(){
+        echo "processing file {$this->path}\n";
+        $fp = fopen($this->path,'r');
+        $fieldNames=fgetcsv($fp); 
+        $orders = [];
 
-        // send a file
-        curl_setopt($request, CURLOPT_POST, true);
-        curl_setopt(
-            $request,
-            CURLOPT_POSTFIELDS,
-            array(
-            'import' => curl_file_create(realpath($this->path),'text/csv'),
-              'model' => $this->model
-            ));
-
-        // output the response
-        curl_setopt($request, CURLOPT_RETURNTRANSFER, true);
-
-        $return = json_decode(curl_exec($request), true);
-        // close the session
-        curl_close($request);
-
-        if ($return){
-            $this->processHeaders($return['result']);
-        }else{
-            array_push($this->errors, "The file import failed.");
-            $this->logger->addError("The file import failed.");
+        while($data=fgetcsv($fp)) {
+            $row = array_combine($fieldNames,$data);
+            var_dump($row);
+            if(isset($row['order_id'])) {
+                // check to see if we've already processed this row
+                if(!isset($orders[$row['order_id']])) { 
+                    $response=$this->acenda->get('order/'.$row['order_id'].'/fulfillments');
+                    if($response->body) {
+                        $result = $response->body->result;
+                        $orders[$row['order_id']] = $result;
+                    }
+                }
+                print_r($orders[$row['order_id']]);                
+                //$this->acenda->post('orderfulfillment',$row);
+            }
         }
+        fclose($fp);
+        $this->renameFile($this->filename,$this->filename.'.processed');
     }
 
     // This function check the file and rewrite the file in local under UNIX code
     private function CSVFileCheck($path_to_file){
         ini_set("auto_detect_line_endings", true);
-
+        $this->filename = basename($path_to_file);
         $this->path = "/tmp/".uniqid().".csv";
-
         $fd_read = fopen($path_to_file, "r");
         $fd_write = fopen($this->path, "w");
 
@@ -158,11 +120,10 @@ class FulfillmentService {
         fclose($fd_read);
         fclose($fd_write);
 
-        $this->processImport();
+        $this->processFile();
     }
 
     private function UnzipFile($info){
-        $c = file_get_contents('/tmp/'.basename($this->configs['subscription']['credentials']['file_url']));
         $where = '/tmp/'.$info['filename'];
         file_put_contents($where, $c);
 
@@ -206,7 +167,71 @@ class FulfillmentService {
             'data' => json_encode($this->errors)
         ]);
     }
+    private function getFileListFtp($url) {
+        $urlParts = parse_url($url);
+        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
+        if(ftp_login($conn_id,$urlParts['user'], $urlParts['pass'])) {
+            $contents = ftp_nlist($conn_id,@$urlParts['path']?$urlParts['path']:'.');
+            return $contents;
+        }
+        else {
+          array_push($this->errors, 'could not connect via ftp - '.$url);
+          $this->logger->addError('could not connect via ftp - '.$url);
+          return false;
+        }
+    }
+    private function getFileListSftp($url) {
+        $urlParts = parse_url($url);
 
+        $this->sftp = new SFTP($urlParts['host'],@$urlParts['port']?$urlParts['port']:22);
+        if (!$this->sftp->login($urlParts['user'], $urlParts['pass'])) {
+          array_push($this->errors, 'could not connect via sftp - '.$url);
+          $this->logger->addError('could not connect via sftp - '.$url);
+          return false;
+       };
+       $files = $this->sftp->nlist(@$urlParts['path']?$urlParts['path']:'.');
+       return $files;
+    }
+    private function renameFileSftp($url,$oldFilenname,$newFilename) {
+        $urlParts = parse_url($url);
+
+        $this->sftp = new SFTP($urlParts['host']);
+        if (!$this->sftp->login($urlParts['user'], $urlParts['pass'])) {
+            array_push($this->errors, 'could not connect via sftp - '.$url);
+            $this->logger->addError('could not connect via sftp - '.$url);
+            return false;
+        };
+        $this->sftp->chdir($urlParts['path']);
+        return $this->sftp->rename($oldFilename,$newFilename);
+    }
+    private function renameFileFtp($url,$oldFilename,$newFilename){
+        $urlParts = parse_url($url);
+        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
+        if(!ftp_login($conn_id,$urlParts['user'], $urlParts['pass'])) {
+            array_push($this->errors, 'could not connect via ftp - '.$url);
+            $this->logger->addError('could not connect via ftp - '.$url);
+            return false;
+        };
+        @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
+        return ftp_rename($conn_id,$oldFilename,$newFilename);
+    }
+    private function renameFile($oldFilename,$newFilename) {
+        echo "renaming $oldFilename to $newFilename\n";
+        $protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');
+        switch($protocol) {
+                case 'sftp':
+                    $ret=$this->renameFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'],$oldFilename,$newFilename);
+                break;
+                case 'ftp':
+                    $ret=$this->renameFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'],$oldFilename,$newFilename);
+                break;
+                default:
+                    $ret=false;
+                break;
+        }  
+
+        return $ret;     
+    }
     private function getFileSftp($url) {
         $urlParts = parse_url($url);
 
@@ -221,38 +246,52 @@ class FulfillmentService {
        return @file_put_contents('/tmp/'.basename($url),$data); 
     }
     private function getFileFtp($url) {
-        $data = @file_get_contents($url);
-        if(!$data) return false;
-    return @file_put_contents('/tmp/'.basename($url),$data);
+        $urlParts = parse_url($url);
+        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
+        if(!ftp_login($conn_id,$urlParts['user'], $urlParts['pass'])) {
+          array_push($this->errors, 'could not connect via ftp - '.$url);
+          $this->logger->addError('could not connect via ftp - '.$url);
+          return false;
+       };
+       @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
+       return ftp_get($conn_id,'/tmp/'.basename($url),basename($urlParts['path']),FTP_ASCII );
     } 
-    private function getFileHttp($url) {
-        $data = @file_get_contents($url);
-        if(!$data) return false;
-    return @file_put_contents('/tmp/'.basename($url),$data);
-    } 
-    private function getFile(){
 
-    $protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');
-    switch($protocol) {
-            case 'http':
-            case 'https':
-                $resp=$this->getFileHttp($this->configs['acenda']['subscription']['credentials']['file_url']);
-        break;
-            case 'sftp':
-                $resp=$this->getFileSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
-            break;
-            case 'ftp':
-                $resp=$this->getFileFtp($this->configs['acenda']['subscription']['credentials']['file_url']);
-            break;
-            default:
-               $resp=false;
-            break;
+    private function getFileList() {
+        $protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');
+        switch($protocol) {
+                case 'sftp':
+                    $files=$this->getFileListSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
+                break;
+                case 'ftp':
+                    $files=$this->getFileListFtp($this->configs['acenda']['subscription']['credentials']['file_url']);
+                break;
+                default:
+                    $files=false;
+                break;
+        }  
+
+        return $files;
     }
+
+    private function getFile($filename){
+        $protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');
+        switch($protocol) {
+                case 'sftp':
+                    $resp=$this->getFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename);
+                break;
+                case 'ftp':
+                    $resp=$this->getFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename);
+                break;
+                default:
+                   $resp=false;
+                break;
+        }
         if($resp){
-            $info = pathinfo($this->configs['acenda']['subscription']['credentials']['file_url']);
+            $info = pathinfo($this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename);
             switch($info["extension"]){
                 case "csv":
-                    $this->CSVFileCheck('/tmp/'.basename($this->configs['acenda']['subscription']['credentials']['file_url']));
+                    $this->CSVFileCheck('/tmp/'.$filename);
                     break;
                 case "zip":
                     $this->UnzipFile($info);
@@ -263,8 +302,8 @@ class FulfillmentService {
                     break;
             }
         }else{
-            array_push($this->errors, "The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url']." couldn't be reached.");
-            $this->logger->addError("The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url']." couldn't be reached.");
+            array_push($this->errors, "The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename." couldn't be reached.");
+            $this->logger->addError("The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename." couldn't be reached.");
         }
     }
 }

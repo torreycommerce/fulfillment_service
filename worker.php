@@ -14,8 +14,7 @@ class WorkerFulfillmentService extends AcendaWorker\Base {
         parent::__construct(__DIR__);
     }
 
-    public function recurringImport($job) {
-        //print_r(array_merge_recursive($this->configs->service, $this->configs->job)); exit;
+    public function FulfillmentService($job) {
         $this->FulfillmentService = new FulfillmentService(array_merge_recursive($this->configs->service, $this->configs->job), $this->logger, $this->getCouchBase());
         $this->FulfillmentService->process();
     }
