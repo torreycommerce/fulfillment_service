@@ -82,29 +82,73 @@ class FulfillmentService {
     private function processFile(){
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
-        $fieldNames=fgetcsv($fp); 
-        $orders = [];
+        // $fieldNames=fgetcsv($fp); 
+        $fieldNames = ['tracking_numbers','order_id','items'];
+        $fulfillments = [];
+        $items = [];
 
         while($data=fgetcsv($fp)) {
             $row = array_combine($fieldNames,$data);
-            var_dump($row);
-            if(isset($row['order_id'])) {
-                // check to see if we've already processed this row
-                if(!isset($orders[$row['order_id']])) { 
+            if(!isset($row['items']) || !$row['items']){ 
+                // skipping row for not having any skus
+                continue;
+            }
+            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
+                // skipping row for not having any tracking info               
+                continue;
+            }
+            $row['items'] = explode('|',$row['items']); 
+            $row['tracking_numbers'] = explode('|',$row['tracking_numbers']);
+            if(isset($row['order_id']) && is_numeric($row['order_id'])) {
+                // fetch items and fulfillments for the order and check to see if we really cant fulfill the item in question
+                if(!isset($fulfillments[$row['order_id']])) {                 
                     $response=$this->acenda->get('order/'.$row['order_id'].'/fulfillments');
                     if($response->body) {
                         $result = $response->body->result;
-                        $orders[$row['order_id']] = $result;
+                        $fulfillments[$row['order_id']] = $result;
+                    }
+                }  
+                if(!isset($items[$row['order_id']])) {                 
+                    $response=$this->acenda->get('order/'.$row['order_id'].'/items');
+                    if($response->body) {
+                        $result = $response->body->result;
+                        $items[$row['order_id']] = $result;
+                    }
+                } 
+                $new_fulfillment = [];
+                $new_fulfillment['tracking_numbers'] = $row['tracking_numbers'];
+                $new_fulfillment['tracking_company'] = $this->configs['acenda']['subscription']['credentials']['tracking_company'];
+                $new_fulfillment['tracking_urls'] = '';
+                $new_fulfillment['order_id']= $row['order_id'];
+                foreach($row['items'] as $item){
+                    foreach($items[$row['order_id']] as $i => $order_item) {
+                        if($order_item->sku == trim($item)) {
+                            if($order_item->fulfilled_quantity < $order_item->quantity) {
+                                $f_item = [];
+                                $f_item['id'] = $order_item->product_id;
+                                $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
+                                $new_fulfillment['items'][] = $f_item;
+                            }
+                        }
                     }
                 }
-                print_r($orders[$row['order_id']]);                
-                //$this->acenda->post('orderfulfillment',$row);
+                if(isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
+                   $p_response = $this->acenda->post('order/'.$row['order_id'].'/fulfillments');
+                   if($p_response['code'] == 200 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
+                         // delay capture items 
+                        $this->captureFulfillment($new_fulfillment);
+  
+                   }
+                }
             }
         }
         fclose($fp);
         $this->renameFile($this->filename,$this->filename.'.processed');
     }
+    private function captureFulfillment(array $fulfillment) {
 
+
+    }
     // This function check the file and rewrite the file in local under UNIX code
     private function CSVFileCheck($path_to_file){
         ini_set("auto_detect_line_endings", true);
