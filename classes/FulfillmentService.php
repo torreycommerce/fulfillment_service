@@ -184,7 +184,7 @@ class FulfillmentService {
 
             $total = $subtotal + $t_response->body->result->tax;
             if($total >= $order->charge_amount) {
-                $total = $total - $order->charge_amount;
+                $total = $order->total - $order->charge_amount;
             }
             echo "total: ". number_format($total)."\n";
             $c_response = $this->acenda->post('order/'.$order->id.'/delaycapture',['amount'=>$total]);
