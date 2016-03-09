@@ -83,9 +83,10 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','order_id','items'];
+        $fieldNames = ['tracking_numbers','order_number','items'];
         $fulfillments = [];
         $items = [];
+        $orders = [];
 
         while($data=fgetcsv($fp)) {
             $row = array_combine($fieldNames,$data);
@@ -99,15 +100,22 @@ class FulfillmentService {
             }
             $row['items'] = explode('|',$row['items']); 
             $row['tracking_numbers'] = explode('|',$row['tracking_numbers']);
-            if(isset($row['order_id']) && is_numeric($row['order_id'])) {
-                // fetch items and fulfillments for the order and check to see if we really cant fulfill the item in question
-                if(!isset($fulfillments[$row['order_id']])) {                 
-                    $response=$this->acenda->get('order/'.$row['order_id'].'/fulfillments');
-                    if($response->body) {
-                        $result = $response->body->result;
-                        $fulfillments[$row['order_id']] = $result;
-                    }
-                }  
+            if(isset($row['order_number']) && is_numeric($row['order_number'])) {
+                $response = $this->acenda->get('order',['query'=>['order_number'=>$row['order_number']]]);
+                if(isset($response->body->result[0]->id)) {
+                    $row['order_id'] = $response->body->result[0]->id;
+                } else {
+                    // unknown order number
+                    continue;
+                }
+                // fetch items and fulfillments for the order and check to see if we really can fulfill the item in question
+              
+                $response=$this->acenda->get('order/'.$row['order_id'].'/fulfillments');
+                if($response->body) {
+                    $result = $response->body->result;
+                    $fulfillments[$row['order_id']] = $result;
+                }
+
                 if(!isset($items[$row['order_id']])) {                 
                     $response=$this->acenda->get('order/'.$row['order_id'].'/items');
                     if($response->body) {
@@ -115,17 +123,20 @@ class FulfillmentService {
                         $items[$row['order_id']] = $result;
                     }
                 } 
+
+
+
                 $new_fulfillment = [];
                 $new_fulfillment['tracking_numbers'] = $row['tracking_numbers'];
-                $new_fulfillment['tracking_company'] = $this->configs['acenda']['subscription']['credentials']['tracking_company'];
-                $new_fulfillment['tracking_urls'] = '';
-                $new_fulfillment['order_id']= $row['order_id'];
+                $new_fulfillment['tracking_urls'] = [];
+                $new_fulfillment['tracking_company'] = 'UPS';
+                $new_fulfillment['status'] = 'success';
                 foreach($row['items'] as $item){
                     foreach($items[$row['order_id']] as $i => $order_item) {
                         if($order_item->sku == trim($item)) {
                             if($order_item->fulfilled_quantity < $order_item->quantity) {
                                 $f_item = [];
-                                $f_item['id'] = $order_item->product_id;
+                                $f_item['id'] = $order_item->id;
                                 $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
                                 $new_fulfillment['items'][] = $f_item;
                             }
@@ -133,11 +144,23 @@ class FulfillmentService {
                     }
                 }
                 if(isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
-                   $p_response = $this->acenda->post('order/'.$row['order_id'].'/fulfillments');
-                   if($p_response['code'] == 200 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
+                   $p_response = $this->acenda->post('order/'.$row['order_id']. '/fulfillments',$new_fulfillment);                    
+                   if($p_response->code >= 200 && $p_response->code < 300 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
                          // delay capture items 
-                        $this->captureFulfillment($new_fulfillment);
-  
+                        $new_fulfillment_id = $p_response->body->result;
+                        $f_response = $this->acenda->get('order/'.$row['order_id'].'/fulfillments/'.$new_fulfillment_id);
+                        if($f_response->code >=200 && $f_response->code <300) {
+                            $new_fulfillment = $f_response->body->result;               
+                            $o_response=$this->acenda->get('order/'.$row['order_id']);
+                            if($o_response->body) {
+                                $result = $o_response->body->result;
+                                $orders[$row['order_id']] = $result;
+                            }
+                            $this->captureFulfillment($orders[$row['order_id']],$new_fulfillment);
+                        } else {
+                            echo "couldnt get new fulfillment #".$new_fulfillment. "\n";
+                            // couldnt get new fulfillment
+                        }
                    }
                 }
             }
@@ -145,9 +168,40 @@ class FulfillmentService {
         fclose($fp);
         $this->renameFile($this->filename,$this->filename.'.processed');
     }
-    private function captureFulfillment(array $fulfillment) {
+    private function captureFulfillment($order, $fulfillment) {
 
+        echo "Capturing for order ".$order->order_number."\n";
+        if($order->charge_amount >= $order->total) {
+            echo "order full amount has already been captured\n";
+            return false;
+        }        
+        $subtotal = 0.00;
+        foreach($fulfillment->items as $item) {
+            $subtotal += $item->price * $item->quantity;
+        }
+        $t_response=$this->acenda->post('taxdata/calculate',['shipping_rate'=>$order->shipping_rate,'shipping_zip'=>$order->shipping_zip,'subtotal'=>$subtotal]);
+        if($t_response->code >=200 && $t_response->code < 300) {
 
+            $total = $subtotal + $t_response->body->result->tax;
+            if($total >= $order->charge_amount) {
+                $total = $total - $order->charge_amount;
+            }
+            echo "total: ". number_format($total)."\n";
+            $c_response = $this->acenda->post('order/'.$order->id.'/delaycapture',['amount'=>$total]);
+            if($c_response->code >=200 && $c_response->code < 300)
+            {
+                echo "capture successful!\n";
+                return true;
+            } else {
+                echo "capture failed\n";
+                print_r($c_response);
+                return false;
+            }
+
+        } else {
+            // tax calculate failed
+            return false;
+        }
     }
     // This function check the file and rewrite the file in local under UNIX code
     private function CSVFileCheck($path_to_file){
