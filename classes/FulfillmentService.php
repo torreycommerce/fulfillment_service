@@ -131,6 +131,14 @@ class FulfillmentService {
                 $new_fulfillment['tracking_urls'] = [];
                 $new_fulfillment['tracking_company'] = 'UPS';
                 $new_fulfillment['status'] = 'success';
+                // if no skus listed.. add all skus
+                if(!count($row['items'])) {
+                    $row['items'] = [];
+                    foreach($items[$row['order_id']] as $i => $order_item) {
+                        $row['items'][]=$order_item->sku;
+                    }
+                }
+
                 foreach($row['items'] as $item){
                     foreach($items[$row['order_id']] as $i => $order_item) {
                         if($order_item->sku == trim($item)) {
@@ -143,6 +151,7 @@ class FulfillmentService {
                         }
                     }
                 }
+
                 if(isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
                    $p_response = $this->acenda->post('order/'.$row['order_id']. '/fulfillments',$new_fulfillment);                    
                    if($p_response->code >= 200 && $p_response->code < 300 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
