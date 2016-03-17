@@ -316,11 +316,11 @@ class FulfillmentService {
         $urlParts = parse_url($url);
         $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
         if(!ftp_login($conn_id,urldecode($urlParts['user']), urldecode($urlParts['pass']))) {
-            ftp_pasv($conn_id, true);            
             array_push($this->errors, 'could not connect via ftp - '.$url);
             $this->logger->addError('could not connect via ftp - '.$url);
             return false;
         };
+            ftp_pasv($conn_id, true);            
         @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
         return ftp_rename($conn_id,$oldFilename,$newFilename);
     }
@@ -358,11 +358,11 @@ class FulfillmentService {
         $urlParts = parse_url($url);
         $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
         if(!ftp_login($conn_id,urldecode($urlParts['user']), urldecode($urlParts['pass']))) {
-          ftp_pasv($conn_id, true);            
           array_push($this->errors, 'could not connect via ftp - '.$url);
           $this->logger->addError('could not connect via ftp - '.$url);
           return false;
        };
+        ftp_pasv($conn_id, true);            
        @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
        return ftp_get($conn_id,'/tmp/'.basename($url),basename($urlParts['path']),FTP_ASCII );
     } 
