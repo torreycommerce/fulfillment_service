@@ -89,10 +89,9 @@ class FulfillmentService {
         $orders = [];
 
         while($data=fgetcsv($fp)) {
-            $row = array_combine($fieldNames,$data);
+            $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
             if(!isset($row['items']) || !$row['items']){ 
-                // skipping row for not having any skus
-                continue;
+                $row['items'] = '';
             }
             if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
                 // skipping row for not having any tracking info               
