@@ -90,14 +90,20 @@ class FulfillmentService {
 
         while($data=fgetcsv($fp)) {
             $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
+ 
+		echo "ROW!";
+            print_r($row);
+
             if(!isset($row['items']) || !$row['items']){ 
-                $row['items'] = '';
+                $row['items'] = [];
             }
             if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
                 // skipping row for not having any tracking info               
                 continue;
             }
-            $row['items'] = explode('|',$row['items']); 
+            if(is_string($row['items'])) {
+               $row['items'] = explode('|',$row['items']); 
+            }
             $row['tracking_numbers'] = explode('|',$row['tracking_numbers']);
             if(isset($row['order_number']) && is_numeric($row['order_number'])) {
                 $response = $this->acenda->get('order',['query'=>['order_number'=>$row['order_number']]]);
