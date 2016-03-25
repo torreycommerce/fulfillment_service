@@ -83,7 +83,7 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','order_number','items'];
+        $fieldNames = ['tracking_numbers','order_number','items','item_quantity'];
         $fulfillments = [];
         $items = [];
         $orders = [];
@@ -132,11 +132,13 @@ class FulfillmentService {
                 $new_fulfillment['status'] = 'success';
                 // if no skus listed.. add all skus
                 if(!count($row['items'])) {
+                    echo "no items listed, adding all\n";
                     $row['items'] = [];
                     foreach($items[$row['order_id']] as $i => $order_item) {
                         $row['items'][]=$order_item->sku;
                     }
                 }
+
 
                 foreach($row['items'] as $item){
                     foreach($items[$row['order_id']] as $i => $order_item) {
