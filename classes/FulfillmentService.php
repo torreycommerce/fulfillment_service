@@ -9,6 +9,11 @@ class FulfillmentService {
     private $subscription;
     private $acenda;
     private $errors = [];
+    private $urlParts = [];
+    private $username = '';
+    private $password = '';
+    private $path = '';
+
 
     public $service_id;
     public $store_id;
@@ -48,6 +53,18 @@ class FulfillmentService {
         echo "Config:\n";
         var_dump($this->configs);
         echo "\n";
+
+        $this->urlParts = parse_url($this->configs['acenda']['subscription']['credentials']['file_url']);
+        $this->username = urldecode($this->urlParts['user']);
+        $this->password = urldecode($this->urlParts['pass']);
+        if(!empty($this->configs['acenda']['subscription']['credentials']['username'])) {
+            $this->username = $this->configs['acenda']['subscription']['credentials']['username'];
+        }
+        if(!empty($this->configs['acenda']['subscription']['credentials']['password'])) {
+            $this->password = $this->configs['acenda']['subscription']['credentials']['password'];
+        }
+
+
         $prefix = $this->configs['acenda']['subscription']['credentials']['file_prefix'];
         $files = $this->getFileList();
         if(is_array($files)) {
@@ -83,7 +100,7 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','order_number','items','item_quantity'];
+        $fieldNames = ['tracking_numbers','order_number','items','item_quantities'];
         $fulfillments = [];
         $items = [];
         $orders = [];
@@ -97,6 +114,9 @@ class FulfillmentService {
             if(!isset($row['items']) || !$row['items']){ 
                 $row['items'] = [];
             }
+            if(!isset($row['item_quantities']) || !$row['item_quantities']){ 
+                $row['item_quantities'] = [];
+            }
             if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
                 // skipping row for not having any tracking info               
                 continue;
@@ -104,6 +124,10 @@ class FulfillmentService {
             if(is_string($row['items'])) {
                $row['items'] = explode('|',$row['items']); 
             }
+            if(is_string($row['item_quantities'])) {
+               $row['item_quantities'] = explode('|',$row['item_quantities']); 
+            }
+
             $row['tracking_numbers'] = explode('|',$row['tracking_numbers']);
             if(isset($row['order_number']) && is_numeric($row['order_number'])) {
                 $response = $this->acenda->get('order',['query'=>['order_number'=>$row['order_number']]]);
@@ -146,13 +170,20 @@ class FulfillmentService {
                 }
 
 
-                foreach($row['items'] as $item){
+                foreach($row['items'] as $index => $item){
                     foreach($items[$row['order_id']] as $i => $order_item) {
                         if($order_item->sku == trim($item)) {
                             if($order_item->fulfilled_quantity < $order_item->quantity) {
                                 $f_item = [];
                                 $f_item['id'] = $order_item->id;
-                                $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
+                                if(isset($row['item_quantities'][$index]) && is_numeric($row['item_quantities'][$index])) {
+                                    $f_item['quantity'] = $row['item_quantities'][$index];
+                                    if(($f_item['quantity'] +  $order_item->fulfilled_quantity) >  $order_item->quantity) {
+                                         $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;    
+                                    }
+                                } else { 
+                                    $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
+                                }
                                 $new_fulfillment['items'][] = $f_item;
                             }
                         }
@@ -282,11 +313,10 @@ class FulfillmentService {
         ]);
     }
     private function getFileListFtp($url) {
-        $urlParts = parse_url($url);
-        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
-        if(ftp_login($conn_id,urldecode($urlParts['user']), urldecode($urlParts['pass']))) {
+        $conn_id = ftp_connect($this->urlParts['host'],@$this->urlParts['port']?$this->urlParts['port']:21);
+        if(ftp_login($conn_id,$this->username, $this->password)) {
             ftp_pasv($conn_id, true);
-            $contents = ftp_nlist($conn_id,@$urlParts['path']?$urlParts['path']:'.');
+            $contents = ftp_nlist($conn_id,@$this->urlParts['path']?$this->urlParts['path']:'.');
             return $contents;
         }
         else {
@@ -296,39 +326,39 @@ class FulfillmentService {
         }
     }
     private function getFileListSftp($url) {
-        $urlParts = parse_url($url);
+        $this->urlParts = parse_url($url);
 
-        $this->sftp = new SFTP($urlParts['host'],@$urlParts['port']?$urlParts['port']:22);
-        if (!$this->sftp->login($urlParts['user'], $urlParts['pass'])) {
+        $this->sftp = new SFTP($this->urlParts['host'],@$this->urlParts['port']?$this->urlParts['port']:22);
+        if (!$this->sftp->login($this->username, $this->password)) {
           array_push($this->errors, 'could not connect via sftp - '.$url);
           $this->logger->addError('could not connect via sftp - '.$url);
           return false;
        };
-       $files = $this->sftp->nlist(@$urlParts['path']?$urlParts['path']:'.');
+       $files = $this->sftp->nlist(@$this->urlParts['path']?$this->urlParts['path']:'.');
        return $files;
     }
     private function renameFileSftp($url,$oldFilenname,$newFilename) {
-        $urlParts = parse_url($url);
+        $this->urlParts = parse_url($url);
 
-        $this->sftp = new SFTP($urlParts['host']);
-        if (!$this->sftp->login($urlParts['user'], $urlParts['pass'])) {
+        $this->sftp = new SFTP($this->urlParts['host']);
+        if (!$this->sftp->login($this->username, $this->password)) {
             array_push($this->errors, 'could not connect via sftp - '.$url);
             $this->logger->addError('could not connect via sftp - '.$url);
             return false;
         };
-        $this->sftp->chdir($urlParts['path']);
+        $this->sftp->chdir($this->urlParts['path']);
         return $this->sftp->rename($oldFilename,$newFilename);
     }
     private function renameFileFtp($url,$oldFilename,$newFilename){
-        $urlParts = parse_url($url);
-        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
-        if(!ftp_login($conn_id,urldecode($urlParts['user']), urldecode($urlParts['pass']))) {
+        $this->urlParts = parse_url($url);
+        $conn_id = ftp_connect($this->urlParts['host'],@$this->urlParts['port']?$this->urlParts['port']:21);
+        if(!ftp_login($conn_id,$this->username, $this->password)) {
             array_push($this->errors, 'could not connect via ftp - '.$url);
             $this->logger->addError('could not connect via ftp - '.$url);
             return false;
         };
             ftp_pasv($conn_id, true);            
-        @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
+        @ftp_chdir($conn_id,($this->urlParts['path'][0]=='/')?substr($this->urlParts['path'],1):$this->urlParts['path']);
         return ftp_rename($conn_id,$oldFilename,$newFilename);
     }
     private function renameFile($oldFilename,$newFilename) {
@@ -349,29 +379,29 @@ class FulfillmentService {
         return $ret;     
     }
     private function getFileSftp($url) {
-        $urlParts = parse_url($url);
+        $this->urlParts = parse_url($url);
 
-        $this->sftp = new SFTP($urlParts['host']);
-        if (!$this->sftp->login($urlParts['user'], $urlParts['pass'])) {
+        $this->sftp = new SFTP($this->urlParts['host']);
+        if (!$this->sftp->login($this->username, $this->password)) {
           array_push($this->errors, 'could not connect via sftp - '.$url);
           $this->logger->addError('could not connect via sftp - '.$url);
           return false;
        };
-       $this->sftp->chdir($urlParts['path']);
-       $data = $this->sftp->get(basename($urlParts['path']));
+       $this->sftp->chdir($this->urlParts['path']);
+       $data = $this->sftp->get(basename($url));
        return @file_put_contents('/tmp/'.basename($url),$data); 
     }
     private function getFileFtp($url) {
-        $urlParts = parse_url($url);
-        $conn_id = ftp_connect($urlParts['host'],@$urlParts['port']?$urlParts['port']:21);
-        if(!ftp_login($conn_id,urldecode($urlParts['user']), urldecode($urlParts['pass']))) {
+        $this->urlParts = parse_url($url);
+        $conn_id = ftp_connect($this->urlParts['host'],@$this->urlParts['port']?$this->urlParts['port']:21);
+        if(!ftp_login($conn_id,$this->username, $this->password)) {
           array_push($this->errors, 'could not connect via ftp - '.$url);
           $this->logger->addError('could not connect via ftp - '.$url);
           return false;
        };
         ftp_pasv($conn_id, true);            
-       @ftp_chdir($conn_id,($urlParts['path'][0]=='/')?substr($urlParts['path'],1):$urlParts['path']);
-       return ftp_get($conn_id,'/tmp/'.basename($url),basename($urlParts['path']),FTP_ASCII );
+       @ftp_chdir($conn_id,($this->urlParts['path'][0]=='/')?substr($this->urlParts['path'],1):$this->urlParts['path']);
+       return ftp_get($conn_id,'/tmp/'.basename($url),basename($url),FTP_ASCII );
     } 
 
     private function getFileList() {
