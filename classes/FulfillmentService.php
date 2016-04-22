@@ -100,7 +100,7 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','order_number','items','item_quantities'];
+        $fieldNames = ['shipping_carrier','shipping_method','tracking_numbers','order_number','items','item_quantities'];
         $fulfillments = [];
         $items = [];
         $orders = [];
@@ -117,8 +117,8 @@ class FulfillmentService {
             if(!isset($row['item_quantities']) || !$row['item_quantities']){ 
                 $row['item_quantities'] = [];
             }
-            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
-                // skipping row for not having any tracking info               
+            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers'] || !isset($row['shipping_carrier']) || !isset($row['shipping_method']) || !$row['shipping_method']) { 
+                // skipping row for not having all tracking info               
                 continue;
             }
             if(is_string($row['items'])) {
@@ -158,7 +158,8 @@ class FulfillmentService {
                 $new_fulfillment = [];
                 $new_fulfillment['tracking_numbers'] = $row['tracking_numbers'];
                 $new_fulfillment['tracking_urls'] = [];
-                $new_fulfillment['tracking_company'] = 'UPS';
+                $new_fulfillment['tracking_company'] = $row['shipping_carrier'];
+                $new_fulfillment['shipping_method'] = $row['shipping_method'];
                 $new_fulfillment['status'] = 'success';
                 // if no skus listed.. add all skus
                 if(!count($row['items'])) {
