@@ -100,7 +100,7 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['shipping_carrier','shipping_method','tracking_numbers','order_number','items','item_quantities'];
+        $fieldNames = ['tracking_numbers','shipping_carrier','shipping_method','order_number','items','item_quantities'];
         $fulfillments = [];
         $items = [];
         $orders = [];
