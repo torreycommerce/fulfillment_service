@@ -100,7 +100,7 @@ class FulfillmentService {
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
         // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','shipping_carrier','shipping_method','order_number','items','item_quantities'];
+        $fieldNames = ['tracking_numbers','order_number','shipping_carrier','shipping_method','items','item_quantities'];
         $fulfillments = [];
         $items = [];
         $orders = [];
@@ -117,7 +117,7 @@ class FulfillmentService {
             if(!isset($row['item_quantities']) || !$row['item_quantities']){ 
                 $row['item_quantities'] = [];
             }
-            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers'] || !isset($row['shipping_carrier']) || !isset($row['shipping_method']) || !$row['shipping_method']) { 
+            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
                 // skipping row for not having all tracking info               
                 continue;
             }
