@@ -60,7 +60,7 @@ class FulfillmentService {
         $this->username = urldecode($this->urlParts['user']);
         $this->password = urldecode($this->urlParts['pass']);
         $this->default_carrier = $this->configs['acenda']['subscription']['credentials']['default_carrier'];
-        $this->default_shipping_method = $this->configs['acenda']['subscription']['default_shipping_method'];
+        $this->default_shipping_method = $this->configs['acenda']['subscription']['credentials']['default_shipping_method'];
 
         if(!empty($this->configs['acenda']['subscription']['credentials']['username'])) {
             $this->username = $this->configs['acenda']['subscription']['credentials']['username'];
