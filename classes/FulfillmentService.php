@@ -13,6 +13,8 @@ class FulfillmentService {
     private $username = '';
     private $password = '';
     private $path = '';
+    private $default_carrier;
+    private $default_shipping_method;
 
 
     public $service_id;
@@ -57,6 +59,9 @@ class FulfillmentService {
         $this->urlParts = parse_url($this->configs['acenda']['subscription']['credentials']['file_url']);
         $this->username = urldecode($this->urlParts['user']);
         $this->password = urldecode($this->urlParts['pass']);
+        $this->default_carrier = $this->configs['acenda']['subscription']['credentials']['default_carrier'];
+        $this->default_shipping_method = $this->configs['acenda']['subscription']['default_shipping_method'];
+
         if(!empty($this->configs['acenda']['subscription']['credentials']['username'])) {
             $this->username = $this->configs['acenda']['subscription']['credentials']['username'];
         }
@@ -158,8 +163,8 @@ class FulfillmentService {
                 $new_fulfillment = [];
                 $new_fulfillment['tracking_numbers'] = $row['tracking_numbers'];
                 $new_fulfillment['tracking_urls'] = [];
-                $new_fulfillment['tracking_company'] = $row['shipping_carrier'];
-                $new_fulfillment['shipping_method'] = $row['shipping_method'];
+                $new_fulfillment['tracking_company'] = !empty($row['shipping_carrier'])?:$this->default_carrier;
+                $new_fulfillment['shipping_method'] = !empty($row['shipping_method'])?:$this->default_shipping_method;
                 $new_fulfillment['status'] = 'success';
                 // if no skus listed.. add all skus
                 if(!count($row['items'])) {
