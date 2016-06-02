@@ -462,7 +462,7 @@ class FulfillmentService {
         }
         if($resp){
             $info = pathinfo($this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename);
-            switch($info["extension"]){
+            switch(strtolower($info["extension"])){
                 case "csv":
                     $this->CSVFileCheck('/tmp/'.$filename);
                     break;
