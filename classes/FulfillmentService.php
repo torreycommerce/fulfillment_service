@@ -310,7 +310,7 @@ class FulfillmentService {
                 foreach($directories as $dir){
                     if ($dir != "." && $dir != ".."){
                         $i = pathinfo($where."/".$dir);
-                        if (isset($i['extension']) && $i['extension'] === 'csv'){
+                        if (isset($i['extension']) && strtolower($i['extension']) === 'csv'){
                             $this->CSVFileCheck($where."/".$dir);
                         }else{
                             array_push($this->errors, "A file in the extracted folder (".$i['filename'].") is not valid.");
@@ -320,7 +320,7 @@ class FulfillmentService {
                 }
             }else{
                 $i = pathinfo($where);
-                if ($i['extension'] === 'csv'){
+                if (strtolower($i['extension']) === 'csv'){
                     $this->checkFileFromZip($where);
                 }else{
                     array_push($this->errors, "The file extracted is not a proper CSV file (".$i['extension'].").");
