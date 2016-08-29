@@ -23,6 +23,28 @@ class FulfillmentService {
     public $service_id;
     public $store_id;
 
+    private $filename;
+    private $prefix;
+
+    public function testStringContents($string = null){
+        $this->setup();
+        if(!$string){
+            $string = $this->configs['acenda']['subscription']['credentials']['feed_content'];
+        }
+        print_r($string);
+        $this->path = tempnam(sys_get_temp_dir(),'fulfillment-service');
+        file_put_contents($this->path,$string);
+        print 'wrote contents to ' . $this->path . PHP_EOL;
+        /*
+         * Do processing
+         */
+        $this->processFile();
+        if(is_file($this->path)){
+            unlink($this->path);
+        }
+        $this->handleErrors();
+        die();
+    }
     public function __construct($configs, $logger, $couchbaseCluster) {
         $this->configs = $configs;
         echo "Shipping ".date("Y-m-d H:i:s")." - {$this->configs['acenda']['store']['name']}\n";
@@ -45,12 +67,16 @@ class FulfillmentService {
         }
     }
 
-    public function process() {
+    private function setup(){
         echo "Processing\n";
         $last_time_ran = $this->lastRunTime->getDatetime('lastTime');
         echo "LastRunTime: ".date("Y-m-d H:i:s",$last_time_ran->getTimestamp())."\n";
         $tmp_query = (!empty($this->subscription['credentials']['query'])) ? json_decode($this->subscription['credentials']['query'], true) : [];
         $tmp_query["date_created"]["\$gt"] = date("Y-m-d H:i:s",$last_time_ran->getTimestamp());
+        /**
+         * @todo What is tmp_query doing? I don't think it's used.
+         * It's totally not used. - BA 8.29.16
+         */
         echo "Query:\n";
         var_dump($tmp_query);
         echo "\n";
@@ -60,27 +86,25 @@ class FulfillmentService {
         echo "\n";
 
         $this->urlParts = parse_url($this->configs['acenda']['subscription']['credentials']['file_url']);
-
         if(empty($this->urlParts['host'])) {
             $this->host= $this->configs['acenda']['subscription']['credentials']['file_url'];
         } else {
             $this->host = $this->urlParts['host'];
         }
 
-
-        $this->protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');        
+        $this->protocol = strtok($this->configs['acenda']['subscription']['credentials']['file_url'],':/');
         if(!empty($this->urlParts['user'])){
             $this->username = urldecode($this->urlParts['user']);
         }
         if(!empty($this->urlParts['pass'])){
             $this->password = urldecode($this->urlParts['pass']);
-        }        
+        }
         if(!empty($this->configs['acenda']['subscription']['credentials']['default_carrier'])){
             $this->default_carrier = $this->configs['acenda']['subscription']['credentials']['default_carrier'];
         }
         if(!empty($this->configs['acenda']['subscription']['credentials']['default_shipping_method'])){
             $this->default_shipping_method = $this->configs['acenda']['subscription']['credentials']['default_shipping_method'];
-        }        
+        }
         if(!empty($this->configs['acenda']['subscription']['credentials']['username'])) {
             $this->username = $this->configs['acenda']['subscription']['credentials']['username'];
         }
@@ -97,14 +121,25 @@ class FulfillmentService {
             $this->remote_path = $this->urlParts['path'];
         }
 
-        $prefix = $this->configs['acenda']['subscription']['credentials']['file_prefix'];
+        $this->prefix = $this->configs['acenda']['subscription']['credentials']['file_prefix'];
+    }
+    public function process() {
+        $this->setup();
         $files = $this->getFileList();
         if(is_array($files)) {
             foreach($files as $file) {
-               if($prefix && substr($file,0,strlen($prefix))!=$prefix) continue;
-               if(strtolower(pathinfo($file, PATHINFO_EXTENSION))!== 'csv') continue;
+                /*
+                 * This checks for a prefix
+                 */
+               if($this->prefix && substr($file,0,strlen($this->prefix))!=$this->prefix){
+                   continue;
+               }
+               if(strtolower(pathinfo($file, PATHINFO_EXTENSION))!== 'csv'){
+                   continue;
+               }
                echo "getting ". $file . "\n";
-               $this->getFile($file);               
+                // Why does getFile not return the file?
+               $this->getFile($file);
             }
         }
         $this->handleErrors();
@@ -128,33 +163,58 @@ class FulfillmentService {
         }
         return $url."/preview/".md5($this->configs['acenda']['store']['name'])."/api/import/upload?access_token=".Acenda\Authentication::getToken();
     }
+
     private function processFile(){
         echo "processing file {$this->path}\n";
         $fp = fopen($this->path,'r');
-        // $fieldNames=fgetcsv($fp); 
-        $fieldNames = ['tracking_numbers','order_number','shipping_carrier','shipping_method','items','item_quantities'];
         $fulfillments = [];
         $items = [];
         $orders = [];
-
+        $map = [];
         while($data=fgetcsv($fp)) {
-            $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
- 
-            if(!isset($row['items']) || !$row['items']){ 
+            if(!$map){
+                $map = $this->buildMap($data);
+                continue;
+            }
+//            if(!$csv_header)
+//            print_r($data);
+//            print 'first intersect:' . PHP_EOL;
+//            print_r(array_intersect_key($fieldNames, $data));
+//            print 'second intersect: ' . PHP_EOL;
+//            array_intersect_key($data, $fieldNames);
+//            $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
+            foreach ($map as $property => $position){
+                $prop_map = [
+                    'header_order_number' => 'order_number',
+                    'header_item_id' => 'items',
+                    'header_quantities' => 'item_quantities',
+                    'header_tracking' => 'tracking_numbers',
+                    'header_carrier' => 'shipping_carrier',
+                    'header_method' => 'shipping_method'
+                ];
+                if(isset($prop_map[$property])){
+                    $row[$prop_map[$property]]=$data[$position];
+                }
+            }
+            print 'Post mapping of data:'.PHP_EOL;
+            print_r($row);
+            print PHP_EOL . PHP_EOL . PHP_EOL;
+            if(!isset($row['items']) || !$row['items']){
                 $row['items'] = [];
             }
-            if(!isset($row['item_quantities']) || !$row['item_quantities']){ 
+            if(!isset($row['item_quantities']) || !$row['item_quantities']){
                 $row['item_quantities'] = [];
             }
-            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) { 
-                // skipping row for not having all tracking info               
+            if(!isset($row['tracking_numbers']) || !$row['tracking_numbers']) {
+                // skipping row for not having all tracking info
+                // @todo Should this log/error somewhere?
                 continue;
             }
             if(is_string($row['items'])) {
-               $row['items'] = explode('|',$row['items']); 
+               $row['items'] = explode('|',$row['items']);
             }
             if(is_string($row['item_quantities'])) {
-               $row['item_quantities'] = explode('|',$row['item_quantities']); 
+               $row['item_quantities'] = explode('|',$row['item_quantities']);
             }
 
             $row['tracking_numbers'] = explode('|',$row['tracking_numbers']);
@@ -167,20 +227,20 @@ class FulfillmentService {
                     continue;
                 }
                 // fetch items and fulfillments for the order and check to see if we really can fulfill the item in question
-              
+
                 $response=$this->acenda->get('order/'.$row['order_id'].'/fulfillments');
                 if($response->body) {
                     $result = $response->body->result;
                     $fulfillments[$row['order_id']] = $result;
                 }
 
-                if(!isset($items[$row['order_id']])) {                 
+                if(!isset($items[$row['order_id']])) {
                     $response=$this->acenda->get('order/'.$row['order_id'].'/items');
                     if($response->body) {
                         $result = $response->body->result;
                         $items[$row['order_id']] = $result;
                     }
-                } 
+                }
 
                 $new_fulfillment = [];
                 $new_fulfillment['tracking_numbers'] = $row['tracking_numbers'];
@@ -207,9 +267,9 @@ class FulfillmentService {
                                 if(isset($row['item_quantities'][$index]) && is_numeric($row['item_quantities'][$index])) {
                                     $f_item['quantity'] = $row['item_quantities'][$index];
                                     if(($f_item['quantity'] +  $order_item->fulfilled_quantity) >  $order_item->quantity) {
-                                         $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;    
+                                         $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
                                     }
-                                } else { 
+                                } else {
                                     $f_item['quantity'] = $order_item->quantity - $order_item->fulfilled_quantity;
                                 }
                                 $new_fulfillment['items'][] = $f_item;
@@ -219,13 +279,13 @@ class FulfillmentService {
                 }
 
                 if(isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
-                   $p_response = $this->acenda->post('order/'.$row['order_id']. '/fulfillments',$new_fulfillment);                    
+                   $p_response = $this->acenda->post('order/'.$row['order_id']. '/fulfillments',$new_fulfillment);
                    if($p_response->code >= 200 && $p_response->code < 300 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
-                         // delay capture items 
+                         // delay capture items
                         $new_fulfillment_id = $p_response->body->result;
                         $f_response = $this->acenda->get('order/'.$row['order_id'].'/fulfillments/'.$new_fulfillment_id);
                         if($f_response->code >=200 && $f_response->code <300) {
-                            $new_fulfillment = $f_response->body->result;               
+                            $new_fulfillment = $f_response->body->result;
                             $o_response=$this->acenda->get('order/'.$row['order_id']);
                             if($o_response->body) {
                                 $result = $o_response->body->result;
@@ -249,7 +309,7 @@ class FulfillmentService {
         if($order->charge_amount >= $order->total) {
             echo "order full amount has already been captured\n";
             return false;
-        }        
+        }
         $subtotal = 0.00;
         foreach($fulfillment->items as $item) {
             $subtotal += $item->price * $item->quantity;
@@ -298,7 +358,8 @@ class FulfillmentService {
 
     private function UnzipFile($info){
         $where = '/tmp/'.$info['filename'];
-        file_put_contents($where, $c);
+        //@todo Commenting this out, due to $c not being defined. BA - 8.29.16
+//        file_put_contents($where, $c);
 
         if (\Comodojo\Zip\Zip::check($where)){
             $zip = \Comodojo\Zip\Zip::open($where);
@@ -333,6 +394,9 @@ class FulfillmentService {
         }
     }
 
+    /**
+     * @todo This doesn't do anything.
+     */
     private function handleErrors(){
         $return = $this->acenda->post("/log", [
             'type' => 'url_based_import',
@@ -341,7 +405,7 @@ class FulfillmentService {
         ]);
     }
     private function getFileListFtp($url) {
-        echo "connecting to ".$this->host."\nwith ".$this->username.":".$this->password."\n";        
+        echo "connecting to ".$this->host."\nwith ".$this->username.":".$this->password."\n";
         $conn_id = ftp_connect($this->host,@$this->urlParts['port']?$this->urlParts['port']:21);
         if(ftp_login($conn_id,$this->username, $this->password)) {
             ftp_pasv($conn_id, true);
@@ -366,7 +430,7 @@ class FulfillmentService {
        $files = $this->sftp->nlist(@$this->remote_path?$this->remote_path:'.');
        return $files;
     }
-    private function renameFileSftp($url,$oldFilenname,$newFilename) {
+    private function renameFileSftp($url,$oldFilename,$newFilename) {
 
         $this->sftp = new SFTP($this->host);
         if (!$this->sftp->login($this->username, $this->password)) {
@@ -384,7 +448,7 @@ class FulfillmentService {
             $this->logger->addError('could not connect via ftp - '.$url);
             return false;
         };
-            ftp_pasv($conn_id, true);            
+            ftp_pasv($conn_id, true);
         @ftp_chdir($conn_id,($this->remote_path[0]=='/')?substr($this->remote_path,1):$this->remote_path);
         return ftp_rename($conn_id,$oldFilename,$newFilename);
     }
@@ -401,9 +465,9 @@ class FulfillmentService {
                 default:
                     $ret=false;
                 break;
-        }  
+        }
 
-        return $ret;     
+        return $ret;
     }
     private function getFileSftp($url) {
 
@@ -415,7 +479,7 @@ class FulfillmentService {
        };
        $this->sftp->chdir($this->remote_path);
        $data = $this->sftp->get(basename($url));
-       return @file_put_contents('/tmp/'.basename($url),$data); 
+       return @file_put_contents('/tmp/'.basename($url),$data);
     }
     private function getFileFtp($url) {
         $conn_id = ftp_connect($this->host,@$this->urlParts['port']?$this->urlParts['port']:21);
@@ -424,14 +488,14 @@ class FulfillmentService {
           $this->logger->addError('could not connect via ftp - '.$url);
           return false;
        };
-        ftp_pasv($conn_id, true);            
+        ftp_pasv($conn_id, true);
        @ftp_chdir($conn_id,($this->remote_path[0]=='/')?substr($this->remote_path,1):$this->remote_path);
        return ftp_get($conn_id,'/tmp/'.basename($url),basename($url),FTP_ASCII );
-    } 
+    }
 
     private function getFileList() {
         $protocol = $this->protocol;
-                echo "connecting to ".$this->host."\nwith ".$this->username.":".$this->password."\n";    
+                echo "connecting to ".$this->host."\nwith ".$this->username.":".$this->password."\n";
         switch(strtolower($protocol)) {
                 case 'sftp':
                     $files=$this->getFileListSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
@@ -442,7 +506,7 @@ class FulfillmentService {
                 default:
                     $files=false;
                 break;
-        }  
+        }
 
         return $files;
     }
@@ -478,5 +542,29 @@ class FulfillmentService {
             array_push($this->errors, "The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename." couldn't be reached.");
             $this->logger->addError("The file provided at the URL ".$this->configs['acenda']['subscription']['credentials']['file_url'].'/'.$filename." couldn't be reached.");
         }
+    }
+
+    /**
+     * @param $data
+     * @return array
+     */
+    private function buildMap($data)
+    {
+        $credentials = $this->configs['acenda']['subscription']['credentials'];
+        $map = [];
+        foreach ($credentials as $property => $value){
+            if(strstr($property,'header_')){
+                foreach ($data as $column_index => $column_value){
+                    if($column_value == $value){
+                        $map[$property]=$column_index;
+                    }
+                }
+            }
+        }
+        if(empty($map)){
+            array_push($this->errors,"Failed to calculate header on first row");
+            return [];
+        }
+        return $map;
     }
 }
