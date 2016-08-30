@@ -195,7 +195,7 @@ class FulfillmentService {
                     'header_carrier' => 'shipping_carrier',
                     'header_method' => 'shipping_method'
                 ];
-                if(isset($prop_map[$property])){
+                if(isset($prop_map[$property]) && isset($data[$position])){
                     $row[$prop_map[$property]]=$data[$position];
                 }
             }
