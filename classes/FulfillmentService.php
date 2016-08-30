@@ -307,6 +307,37 @@ class FulfillmentService {
         fclose($fp);
         $this->renameFile($this->filename,$this->filename.'.processed');
     }
+    /**
+     * @param $data
+     * @return array
+     */
+    private function buildMap($data)
+    {
+        $credentials = $this->configs['acenda']['subscription']['credentials'];
+        $map = [];
+        foreach ($credentials as $property => $value){
+            if(strstr($property,'header_')){
+                foreach ($data as $column_index => $column_value){
+                    if($column_value == $value){
+                        $map[$property]=$column_index;
+                    }
+                }
+            }
+        }
+        if(empty($map)){
+            /*
+             * This is added to support the 'legacy' behavior - which was to use column position
+             */
+            $fieldNames = ['header_tracking','header_order_number','header_carrier','header_method','header_item_id','header_quantities'];
+            array_push($this->errors,"No header map, using default column positions");
+            $i=0;
+            foreach ($fieldNames as $fieldName){
+                $map[$fieldName]=$i;
+                $i++;
+            }
+        }
+        return $map;
+    }
     private function captureFulfillment($order, $fulfillment) {
 
         echo "Capturing for order ".$order->order_number."\n";
@@ -550,35 +581,5 @@ class FulfillmentService {
         }
     }
 
-    /**
-     * @param $data
-     * @return array
-     */
-    private function buildMap($data)
-    {
-        $credentials = $this->configs['acenda']['subscription']['credentials'];
-        $map = [];
-        foreach ($credentials as $property => $value){
-            if(strstr($property,'header_')){
-                foreach ($data as $column_index => $column_value){
-                    if($column_value == $value){
-                        $map[$property]=$column_index;
-                    }
-                }
-            }
-        }
-        if(empty($map)){
-            /*
-             * This is added to support the 'legacy' behavior - which was to use column position
-             */
-            $fieldNames = ['tracking_numbers','order_number','shipping_carrier','shipping_method','items','item_quantities'];
-            array_push($this->errors,"No header map, using default column positions");
-            $i=0;
-            foreach ($fieldNames as $fieldName){
-                $map[$fieldName]=$i;
-                $i++;
-            }
-        }
-        return $map;
-    }
+
 }
