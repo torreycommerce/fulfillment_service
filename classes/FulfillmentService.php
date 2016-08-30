@@ -175,9 +175,6 @@ class FulfillmentService {
             print_r($data);
             $i++;
             if(empty($map)){
-                if($i > 2){
-                    throw new Exception('no header found');
-                }
                 $map = $this->buildMap($data);
                 print_r($map);
                 continue;
@@ -571,8 +568,16 @@ class FulfillmentService {
             }
         }
         if(empty($map)){
-            array_push($this->errors,"Failed to calculate header on first row");
-            return [];
+            /*
+             * This is added to support the 'legacy' behavior - which was to use column position
+             */
+            $fieldNames = ['tracking_numbers','order_number','shipping_carrier','shipping_method','items','item_quantities'];
+            array_push($this->errors,"No header map, using default column positions");
+            $i=0;
+            foreach ($fieldNames as $fieldName){
+                $map[$fieldName]=$i;
+                $i++;
+            }
         }
         return $map;
     }
