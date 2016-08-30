@@ -43,7 +43,6 @@ class FulfillmentService {
             unlink($this->path);
         }
         $this->handleErrors();
-        die();
     }
     public function __construct($configs, $logger, $couchbaseCluster) {
         $this->configs = $configs;
@@ -171,9 +170,16 @@ class FulfillmentService {
         $items = [];
         $orders = [];
         $map = [];
+        $i = 0;
         while($data=fgetcsv($fp)) {
-            if(!$map){
+            print_r($data);
+            $i++;
+            if(empty($map)){
+                if($i > 2){
+                    throw new Exception('no header found');
+                }
                 $map = $this->buildMap($data);
+                print_r($map);
                 continue;
             }
 //            if(!$csv_header)
@@ -198,6 +204,7 @@ class FulfillmentService {
             }
             print 'Post mapping of data:'.PHP_EOL;
             print_r($row);
+
             print PHP_EOL . PHP_EOL . PHP_EOL;
             if(!isset($row['items']) || !$row['items']){
                 $row['items'] = [];
@@ -403,6 +410,8 @@ class FulfillmentService {
             'type_id' => $this->configs['acenda']['service']['id'],
             'data' => json_encode($this->errors)
         ]);
+        print_r($return);
+        $this->logger->addError(print_r($return, true));
     }
     private function getFileListFtp($url) {
         echo "connecting to ".$this->host."\nwith ".$this->username.":".$this->password."\n";
