@@ -139,7 +139,7 @@ class FulfillmentService {
 
         while($data=fgetcsv($fp)) {
             $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
-            $row = array_map('trim',$row)
+            $row = array_map('trim',$row);
  
             if(!isset($row['items']) || !$row['items']){ 
                 $row['items'] = [];
