@@ -1,11 +1,11 @@
 {
     "acenda": {
         "credentials": {
-            "client_id": "0cdb2dd31f491ddb5567eab43072c31e@acenda.com",
-            "client_secret": "96bd8fffbb02a7541041dffc78ab9fae"
+            "client_id": "6ec01f2329492072c6b0974474805cda@acenda.com",
+            "client_secret": "5826a6e7f54281b5dd434161865cd920"
         },
 	"service":{
-	    "id": 2
+	    "id": 1668611
 	}
     }
 }

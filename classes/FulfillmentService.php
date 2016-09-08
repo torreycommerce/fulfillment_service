@@ -150,6 +150,7 @@ class FulfillmentService
 //            print 'second intersect: ' . PHP_EOL;
 //            array_intersect_key($data, $fieldNames);
 //            $row = array_combine(array_intersect_key($fieldNames, $data), array_intersect_key($data, $fieldNames));
+            $row = [];
             foreach ($map as $property => $position) {
                 $prop_map = [
                     'header_order_number' => 'order_number',
@@ -165,8 +166,6 @@ class FulfillmentService
             }
             print 'Post mapping of data:' . PHP_EOL;
             print_r($row);
-
-            print PHP_EOL . PHP_EOL . PHP_EOL;
             if (!isset($row['items']) || !$row['items']) {
                 $row['items'] = [];
             }
