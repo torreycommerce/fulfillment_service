@@ -16,6 +16,9 @@ class WorkerFulfillmentService extends AcendaWorker\Base {
 
     public function FulfillmentService($job) {
         $this->FulfillmentService = new FulfillmentService(array_merge_recursive($this->configs->service, $this->configs->job), $this->logger, $this->getCouchBase());
+        // If you want to test - comment out this line (And comment out process)
+        // Then set the string contents of the file in the service subscription
+//        $this->FulfillmentService->testStringContents();
         $this->FulfillmentService->process();
     }
 }
