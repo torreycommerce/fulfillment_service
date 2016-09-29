@@ -134,14 +134,21 @@ class FulfillmentService
         $orders = [];
         $map = [];
         $i = 0;
+        $hasHeaders = false;
         while ($data = fgetcsv($fp)) {
+            echo "The data:\n";
             print_r($data);
             $data = array_map('trim', $data);
             $i++;
             if (empty($map)) {
                 $map = $this->buildMap($data);
                 print_r($map);
-                continue;
+                foreach (this->configs['acenda']['subscription']['credentials'] as $property => $value) {
+                    if (strstr($property, 'header_')) {
+                        $hasHeaders = true;
+                    }
+                }
+                if($hasHeaders) continue;
             }
 //            if(!$csv_header)
 //            print_r($data);
