@@ -143,7 +143,7 @@ class FulfillmentService
             if (empty($map)) {
                 $map = $this->buildMap($data);
                 print_r($map);
-                foreach (this->configs['acenda']['subscription']['credentials'] as $property => $value) {
+                foreach ($this->configs['acenda']['subscription']['credentials'] as $property => $value) {
                     if (strstr($property, 'header_')) {
                         $hasHeaders = true;
                     }
