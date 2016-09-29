@@ -190,6 +190,7 @@ class FulfillmentService
                 if (isset($response->body->result[0]->id)) {
                     $row['order_id'] = $response->body->result[0]->id;
                 } else {
+                    $this->logger->addWarning("Unknown order number: ".$row['order_number']);
                     // unknown order number
                     continue;
                 }
@@ -260,7 +261,9 @@ class FulfillmentService
                             }
                             $this->captureFulfillment($orders[$row['order_id']], $new_fulfillment);
                         } else {
-                            echo "couldnt get new fulfillment #" . $new_fulfillment . "\n";
+
+                            $this->logger->addWarning('couldnt get new fulfillment #'.$new_fulfillment)
+                            echo "couldnt get new fulfillment #".$new_fulfillment. "\n";
                             // couldnt get new fulfillment
                         }
                     }
