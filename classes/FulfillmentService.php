@@ -175,6 +175,8 @@ class FulfillmentService
             if (!isset($row['tracking_numbers']) || !$row['tracking_numbers']) {
                 // skipping row for not having all tracking info
                 // @todo Should this log/error somewhere?
+                echo "no tracking info\n";
+                var_dump($data);
                 continue;
             }
             if (is_string($row['items'])) {
@@ -191,6 +193,7 @@ class FulfillmentService
                     $row['order_id'] = $response->body->result[0]->id;
                 } else {
                     $this->logger->addWarning("Unknown order number: ".$row['order_number']);
+                    echo "unknown order number ".$row['order_number']."\n";
                     // unknown order number
                     continue;
                 }
