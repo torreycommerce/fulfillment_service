@@ -262,7 +262,7 @@ class FulfillmentService
                             $this->captureFulfillment($orders[$row['order_id']], $new_fulfillment);
                         } else {
 
-                            $this->logger->addWarning('couldnt get new fulfillment #'.$new_fulfillment)
+                            $this->logger->addWarning('couldnt get new fulfillment #'.$new_fulfillment);
                             echo "couldnt get new fulfillment #".$new_fulfillment. "\n";
                             // couldnt get new fulfillment
                         }
