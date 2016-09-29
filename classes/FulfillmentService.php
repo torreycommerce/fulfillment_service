@@ -12,6 +12,7 @@ class FulfillmentService
     private $subscription;
     private $acenda;
     private $errors = [];
+    private $firstLineHeaders=false;
     private $urlParts = [];
     private $username = '';
     private $password = '';
@@ -143,12 +144,7 @@ class FulfillmentService
             if (empty($map)) {
                 $map = $this->buildMap($data);
                 print_r($map);
-                foreach ($this->configs['acenda']['subscription']['credentials'] as $property => $value) {
-                    if (strstr($property, 'header_')) {
-                        $hasHeaders = true;
-                    }
-                }
-                if($hasHeaders) continue;
+                if($this->firstLineHeaders) continue;
             }
 //            if(!$csv_header)
 //            print_r($data);
@@ -312,6 +308,8 @@ class FulfillmentService
                 $map[$fieldName] = $i;
                 $i++;
             }
+        } else {
+            $this->firstLineHeaders=true;
         }
         return $map;
     }
