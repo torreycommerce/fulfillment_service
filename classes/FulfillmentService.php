@@ -191,7 +191,10 @@ class FulfillmentService
 
             $row['tracking_numbers'] = explode('|', $row['tracking_numbers']);
             if (isset($row['order_number']) && is_numeric($row['order_number'])) {
-                $response = $this->acenda->get('order', ['query' => ['order_number' => $row['order_number']]]);
+                do {
+                    $response = $this->acenda->get('order', ['query' => ['order_number' => $row['order_number']]]);
+                    if($response->code == 429) sleep(3);
+                } while(  $response->code == 429 );
                 if (isset($response->body->result[0]->id)) {
                     $row['order_id'] = $response->body->result[0]->id;
                 } else {
@@ -202,14 +205,21 @@ class FulfillmentService
                 }
                 // fetch items and fulfillments for the order and check to see if we really can fulfill the item in question
 
-                $response = $this->acenda->get('order/' . $row['order_id'] . '/fulfillments');
+                do {
+                    $response = $this->acenda->get('order/' . $row['order_id'] . '/fulfillments');
+                    if($response->code == 429) sleep(3);                    
+                } while( $response->code == 429 );
                 if ($response->body) {
                     $result = $response->body->result;
                     $fulfillments[$row['order_id']] = $result;
                 }
 
                 if (!isset($items[$row['order_id']])) {
-                    $response = $this->acenda->get('order/' . $row['order_id'] . '/items');
+                    do { 
+                        $response = $this->acenda->get('order/' . $row['order_id'] . '/items');
+                        if($response->code == 429) sleep(3);
+                    } while(  $response->code == 429 );
+
                     if ($response->body) {
                         $result = $response->body->result;
                         $items[$row['order_id']] = $result;
