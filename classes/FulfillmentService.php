@@ -54,7 +54,7 @@ class FulfillmentService
         if (!$string) {
             $string = $this->configs['acenda']['subscription']['credentials']['feed_content'];
         }
-        print_r($string);
+//        print_r($string);
         $this->path = tempnam(sys_get_temp_dir(), 'fulfillment-service');
         file_put_contents($this->path, $string);
         print 'wrote contents to ' . $this->path . PHP_EOL;
@@ -137,13 +137,13 @@ class FulfillmentService
         $i = 0;
         $hasHeaders = false;
         while ($data = fgetcsv($fp)) {
-            echo "The data:\n";
-            print_r($data);
+//            echo "The data:\n";
+//            print_r($data);
             $data = array_map('trim', $data);
             $i++;
             if (empty($map)) {
                 $map = $this->buildMap($data);
-                print_r($map);
+//                print_r($map);
                 if($this->firstLineHeaders) continue;
             }
 //            if(!$csv_header)
@@ -167,8 +167,8 @@ class FulfillmentService
                     $row[$prop_map[$property]] = $data[$position];
                 }
             }
-            print 'Post mapping of data:' . PHP_EOL;
-            print_r($row);
+//            print 'Post mapping of data:' . PHP_EOL;
+//            print_r($row);
             if (!isset($row['items']) || !$row['items']) {
                 $row['items'] = [];
             }
@@ -486,7 +486,7 @@ class FulfillmentService
         if (ftp_login($conn_id, $this->username, $this->password)) {
             ftp_pasv($conn_id, true);
             $contents = ftp_nlist($conn_id, @$this->remote_path ? $this->remote_path : '.');
-            print_r($contents);
+//            print_r($contents);
             return $contents;
         } else {
             array_push($this->errors, 'could not connect via ftp - ' . $url);
