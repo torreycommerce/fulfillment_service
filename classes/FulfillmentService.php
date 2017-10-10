@@ -244,7 +244,8 @@ class FulfillmentService
 
                 foreach ($row['items'] as $index => $item) {
                     foreach ($items[$row['order_id']] as $i => $order_item) {
-                        if ($order_item->sku == trim($item)) {
+                        if(!trim($item)) continue;
+                        if ($order_item->sku == trim($item) || $order_item->barcode == trim($item)) {
                             if ($order_item->fulfilled_quantity < $order_item->quantity) {
                                 $f_item = [];
                                 $f_item['id'] = $order_item->id;
