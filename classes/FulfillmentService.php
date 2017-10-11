@@ -264,6 +264,8 @@ class FulfillmentService
                 }
 
                 if (isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
+                    echo "adding new fulfillment:\n";
+                    print_r($new_fulfillment);
                     $p_response = $this->acenda->post('order/' . $row['order_id'] . '/fulfillments', $new_fulfillment);
                     if ($p_response->code >= 200 && $p_response->code < 300 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
                         // delay capture items
