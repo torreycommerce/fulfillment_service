@@ -191,6 +191,8 @@ class FulfillmentService
             }
 
             $row['tracking_numbers'] = explode('|', $row['tracking_numbers']);
+            $this->logger->addInfo("Tracking number results: " . print_r($row['tracking_numbers'],true));
+            $this->logger->addInfo("Full row: " . print_r($row,true));
             if (isset($row['order_number']) && is_numeric($row['order_number'])) {
                 do {
                     $response = $this->acenda->get('order', ['query' => ['order_number' => $row['order_number']]]);
