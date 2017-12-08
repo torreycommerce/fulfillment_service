@@ -265,9 +265,11 @@ class FulfillmentService
                 }
 
                 if (isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
-                    echo "adding new fulfillment:\n";
-                    print_r($new_fulfillment);
+                    $this->logger->addInfo("adding new fulfillment:");
+                    $this->logger->addInfo(print_r($new_fulfillment, true));
                     $p_response = $this->acenda->post('order/' . $row['order_id'] . '/fulfillments', $new_fulfillment);
+                    $this->logger->addInfo("Acenda Response:");
+                    $this->logger->addInfo(print_r($p_response, true));
                     if ($p_response->code >= 200 && $p_response->code < 300 && $this->configs['acenda']['subscription']['credentials']['charge_order']) {
                         // delay capture items
                         $new_fulfillment_id = $p_response->body->result;
@@ -281,7 +283,6 @@ class FulfillmentService
                             }
                             $this->captureFulfillment($orders[$row['order_id']], $new_fulfillment);
                         } else {
-
                             $this->logger->addWarning('couldnt get new fulfillment #' . $new_fulfillment);
                             echo "couldnt get new fulfillment #" . $new_fulfillment . "\n";
                             // couldnt get new fulfillment
@@ -325,13 +326,14 @@ class FulfillmentService
         } else {
             $this->firstLineHeaders = true;
         }
-        $this->logger->addInfo("Header map: " . print_r($map,true));
+        $this->logger->addInfo("Header map: " . print_r($map, true));
         return $map;
     }
 
     private function captureFulfillment($order, $fulfillment)
     {
-
+        $this->logger->addInfo("Capturing Fulfillment: ");
+        $this->logger->addInfo(print_r($fulfillment, true));
         $this->logger->addInfo("Capturing for order " . $order->order_number);
         if ($order->charge_amount >= $order->total) {
             $this->logger->addInfo("order full amount has already been captured");
