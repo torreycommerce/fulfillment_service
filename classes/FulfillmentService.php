@@ -267,8 +267,9 @@ class FulfillmentService
                         }
                     }
                 }
-
+                print_r($new_fulfillment);
                 if (isset($new_fulfillment['items']) && count($new_fulfillment['items'])) {
+
                     $this->logger->addInfo("adding new fulfillment:");
                     $this->logger->addInfo(print_r($new_fulfillment, true));
                     $p_response = $this->acenda->post('order/' . $row['order_id'] . '/fulfillments', $new_fulfillment);
@@ -321,7 +322,9 @@ function buildMap($data)
         /*
          * This is added to support the 'legacy' behavior - which was to use column position
          */
-        $fieldNames = ['header_tracking', 'header_order_number', 'header_carrier', 'header_method', 'header_item_id', 'header_quantities'];
+  //      $fieldNames = ['header_tracking', 'header_order_number', 'header_carrier', 'header_method', 'header_item_id', 'header_quantities'];
+        $fieldNames = ['header_tracking', 'header_order_number','header_item_id'];
+
         array_push($this->errors, "No header map, using default column positions");
         $i = 0;
         foreach ($fieldNames as $fieldName) {
@@ -335,8 +338,7 @@ function buildMap($data)
     return $map;
 }
 
-private
-function captureFulfillment($order, $fulfillment)
+private function captureFulfillment($order, $fulfillment)
 {
     $this->logger->addInfo("Capturing Fulfillment: ");
     $this->logger->addInfo(print_r($fulfillment, true));
