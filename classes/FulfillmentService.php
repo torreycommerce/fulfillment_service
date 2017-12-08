@@ -1,5 +1,6 @@
 <?php
 require_once(__DIR__ . "/Couchbase/LastRunTime.php");
+
 use phpseclib\Net\SFTP;
 
 class FulfillmentService
@@ -12,7 +13,7 @@ class FulfillmentService
     private $subscription;
     private $acenda;
     private $errors = [];
-    private $firstLineHeaders=false;
+    private $firstLineHeaders = false;
     private $urlParts = [];
     private $username = '';
     private $password = '';
@@ -28,7 +29,6 @@ class FulfillmentService
     public function __construct($configs, $logger, $couchbaseCluster)
     {
         $this->configs = $configs;
-        echo "Shipping " . date("Y-m-d H:i:s") . " - {$this->configs['acenda']['store']['name']}\n";
         $this->logger = $logger;
         $this->service_id = $this->configs['acenda']['service']['id'];
         $this->store_id = $this->configs['acenda']['store']['id'];
@@ -37,6 +37,7 @@ class FulfillmentService
             $this->configs['acenda']['credentials']['client_secret'],
             $this->store_name
         );
+        $this->logger->addInfo("Shipping " . date("Y-m-d H:i:s") . " - {$this->configs['acenda']['store']['name']}");
 
         $this->lastRunTime = new lastRunTime($this->store_id,
             $couchbaseCluster
@@ -144,7 +145,7 @@ class FulfillmentService
             if (empty($map)) {
                 $map = $this->buildMap($data);
 //                print_r($map);
-                if($this->firstLineHeaders) continue;
+                if ($this->firstLineHeaders) continue;
             }
 //            if(!$csv_header)
 //            print_r($data);
@@ -193,13 +194,13 @@ class FulfillmentService
             if (isset($row['order_number']) && is_numeric($row['order_number'])) {
                 do {
                     $response = $this->acenda->get('order', ['query' => ['order_number' => $row['order_number']]]);
-                    if($response->code == 429) sleep(3);
-                } while(  $response->code == 429 );
+                    if ($response->code == 429) sleep(3);
+                } while ($response->code == 429);
                 if (isset($response->body->result[0]->id)) {
                     $row['order_id'] = $response->body->result[0]->id;
                 } else {
-                    $this->logger->addWarning("Unknown order number: ".$row['order_number']);
-                    echo "unknown order number ".$row['order_number']."\n";
+                    $this->logger->addWarning("Unknown order number: " . $row['order_number']);
+                    echo "unknown order number " . $row['order_number'] . "\n";
                     // unknown order number
                     continue;
                 }
@@ -207,18 +208,18 @@ class FulfillmentService
 
                 do {
                     $response = $this->acenda->get('order/' . $row['order_id'] . '/fulfillments');
-                    if($response->code == 429) sleep(3);                    
-                } while( $response->code == 429 );
+                    if ($response->code == 429) sleep(3);
+                } while ($response->code == 429);
                 if ($response->body) {
                     $result = $response->body->result;
                     $fulfillments[$row['order_id']] = $result;
                 }
 
                 if (!isset($items[$row['order_id']])) {
-                    do { 
+                    do {
                         $response = $this->acenda->get('order/' . $row['order_id'] . '/items');
-                        if($response->code == 429) sleep(3);
-                    } while(  $response->code == 429 );
+                        if ($response->code == 429) sleep(3);
+                    } while ($response->code == 429);
 
                     if ($response->body) {
                         $result = $response->body->result;
@@ -244,7 +245,7 @@ class FulfillmentService
 
                 foreach ($row['items'] as $index => $item) {
                     foreach ($items[$row['order_id']] as $i => $order_item) {
-                        if(!trim($item)) continue;
+                        if (!trim($item)) continue;
                         if ($order_item->sku == trim($item) || $order_item->barcode == trim($item)) {
                             if ($order_item->fulfilled_quantity < $order_item->quantity) {
                                 $f_item = [];
@@ -281,8 +282,8 @@ class FulfillmentService
                             $this->captureFulfillment($orders[$row['order_id']], $new_fulfillment);
                         } else {
 
-                            $this->logger->addWarning('couldnt get new fulfillment #'.$new_fulfillment);
-                            echo "couldnt get new fulfillment #".$new_fulfillment. "\n";
+                            $this->logger->addWarning('couldnt get new fulfillment #' . $new_fulfillment);
+                            echo "couldnt get new fulfillment #" . $new_fulfillment . "\n";
                             // couldnt get new fulfillment
                         }
                     }
@@ -322,17 +323,18 @@ class FulfillmentService
                 $i++;
             }
         } else {
-            $this->firstLineHeaders=true;
+            $this->firstLineHeaders = true;
         }
+        $this->logger->addInfo("Header map: " . print_r($map,true));
         return $map;
     }
 
     private function captureFulfillment($order, $fulfillment)
     {
 
-        echo "Capturing for order " . $order->order_number . "\n";
+        $this->logger->addInfo("Capturing for order " . $order->order_number);
         if ($order->charge_amount >= $order->total) {
-            echo "order full amount has already been captured\n";
+            $this->logger->addInfo("order full amount has already been captured");
             return false;
         }
         $subtotal = 0.00;
@@ -346,26 +348,31 @@ class FulfillmentService
             if ($total >= $order->charge_amount) {
                 $total = $order->total - $order->charge_amount;
             }
-            echo "total: " . number_format($total) . "\n";
+            $this->logger->addInfo("total: " . number_format($total));
             $c_response = $this->acenda->post('order/' . $order->id . '/delaycapture', ['amount' => $total]);
             if ($c_response->code >= 200 && $c_response->code < 300) {
-                echo "capture successful!\n";
+                $this->logger->addInfo("capture successful!");
                 return true;
             } else {
                 echo "capture failed\n";
                 print_r($c_response);
+                $this->logger->addError("Request to acenda hit 'Capture Failed' silent return. Logging the actual response");
+                $this->logger->addError(print_r($c_response, true));
                 return false;
             }
 
         } else {
             // tax calculate failed
+            // How the hell can you assume this? What about throttle?
+            $this->logger->addError("Request to acenda hit 'Capture Failed' silent return. Logging the actual response");
+            $this->logger->addError(print_r($t_response, true));
             return false;
         }
     }
 
     private function renameFile($oldFilename, $newFilename)
     {
-        echo "renaming $oldFilename to $newFilename\n";
+        $this->logger->addInfo("renaming $oldFilename to $newFilename");
         $protocol = $this->protocol;
         switch (strtolower($protocol)) {
             case 'sftp':
@@ -439,21 +446,21 @@ class FulfillmentService
                 if (strtolower(pathinfo($file, PATHINFO_EXTENSION)) !== 'csv') {
                     continue;
                 }
-                echo "getting " . $file . "\n";
+                $this->logger->addInfo("getting " . $file);
                 // Why does getFile not return the file?
                 $this->getFile($file);
             }
         }
         $this->handleErrors();
 
-        echo "End LastRunTime: " . date("Y-m-d H:i:s", LastRunTime::getCurrentTimestamp()) . "\n\n";
+        $this->logger->addInfo("End LastRunTime: " . date("Y-m-d H:i:s", LastRunTime::getCurrentTimestamp()));
         $this->lastRunTime->setDatetime('lastTime', LastRunTime::getCurrentTimestamp());
     }
 
     private function getFileList()
     {
         $protocol = $this->protocol;
-        echo "connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password . "\n";
+        $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
         switch (strtolower($protocol)) {
             case 'sftp':
                 $files = $this->getFileListSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
@@ -484,7 +491,7 @@ class FulfillmentService
 
     private function getFileListFtp($url)
     {
-        echo "connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password . "\n";
+        $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
         $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
         if (ftp_login($conn_id, $this->username, $this->password)) {
             ftp_pasv($conn_id, true);
