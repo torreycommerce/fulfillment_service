@@ -179,8 +179,8 @@ class FulfillmentService
             if (!isset($row['tracking_numbers']) || !$row['tracking_numbers']) {
                 // skipping row for not having all tracking info
                 // @todo Should this log/error somewhere?
-                echo "no tracking info\n";
-                var_dump($data);
+                $this->logger->addError("no tracking info");
+                $this->logger->addError(print_r($data, true));
                 continue;
             }
             if (is_string($row['items'])) {
@@ -191,8 +191,8 @@ class FulfillmentService
             }
 
             $row['tracking_numbers'] = explode('|', $row['tracking_numbers']);
-            $this->logger->addInfo("Tracking number results: " . print_r($row['tracking_numbers'],true));
-            $this->logger->addInfo("Full row: " . print_r($row,true));
+            $this->logger->addInfo("Tracking number results: " . print_r($row['tracking_numbers'], true));
+            $this->logger->addInfo("Full row: " . print_r($row, true));
             if (isset($row['order_number']) && is_numeric($row['order_number'])) {
                 do {
                     $response = $this->acenda->get('order', ['query' => ['order_number' => $row['order_number']]]);
@@ -214,7 +214,9 @@ class FulfillmentService
                 } while ($response->code == 429);
                 if ($response->body) {
                     $result = $response->body->result;
-                    $fulfillments[$row['order_id']] = $result;
+                    if($result->status == 'success'){
+                        $fulfillments[$row['order_id']] = $result;
+                    }
                 }
 
                 if (!isset($items[$row['order_id']])) {
@@ -292,357 +294,373 @@ class FulfillmentService
                     }
                 }
             }
-        }
-        fclose($fp);
-        $this->renameFile($this->filename, $this->filename . '.processed');
-    }
+}
+fclose($fp);
+$this->renameFile($this->filename, $this->filename . '.processed');
+}
 
-    /**
-     * @param $data
-     * @return array
-     */
-    private function buildMap($data)
-    {
-        $credentials = $this->configs['acenda']['subscription']['credentials'];
-        $map = [];
-        foreach ($credentials as $property => $value) {
-            if (strstr($property, 'header_')) {
-                foreach ($data as $column_index => $column_value) {
-                    if ($column_value == $value) {
-                        $map[$property] = $column_index;
-                    }
+/**
+ * @param $data
+ * @return array
+ */
+private
+function buildMap($data)
+{
+    $credentials = $this->configs['acenda']['subscription']['credentials'];
+    $map = [];
+    foreach ($credentials as $property => $value) {
+        if (strstr($property, 'header_')) {
+            foreach ($data as $column_index => $column_value) {
+                if ($column_value == $value) {
+                    $map[$property] = $column_index;
                 }
             }
         }
-        if (empty($map)) {
-            /*
-             * This is added to support the 'legacy' behavior - which was to use column position
-             */
-            $fieldNames = ['header_tracking', 'header_order_number', 'header_carrier', 'header_method', 'header_item_id', 'header_quantities'];
-            array_push($this->errors, "No header map, using default column positions");
-            $i = 0;
-            foreach ($fieldNames as $fieldName) {
-                $map[$fieldName] = $i;
-                $i++;
-            }
-        } else {
-            $this->firstLineHeaders = true;
-        }
-        $this->logger->addInfo("Header map: " . print_r($map, true));
-        return $map;
     }
-
-    private function captureFulfillment($order, $fulfillment)
-    {
-        $this->logger->addInfo("Capturing Fulfillment: ");
-        $this->logger->addInfo(print_r($fulfillment, true));
-        $this->logger->addInfo("Capturing for order " . $order->order_number);
-        if ($order->charge_amount >= $order->total) {
-            $this->logger->addInfo("order full amount has already been captured");
-            return false;
+    if (empty($map)) {
+        /*
+         * This is added to support the 'legacy' behavior - which was to use column position
+         */
+        $fieldNames = ['header_tracking', 'header_order_number', 'header_carrier', 'header_method', 'header_item_id', 'header_quantities'];
+        array_push($this->errors, "No header map, using default column positions");
+        $i = 0;
+        foreach ($fieldNames as $fieldName) {
+            $map[$fieldName] = $i;
+            $i++;
         }
-        $subtotal = 0.00;
-        foreach ($fulfillment->items as $item) {
-            $subtotal += $item->price * $item->quantity;
+    } else {
+        $this->firstLineHeaders = true;
+    }
+    $this->logger->addInfo("Header map: " . print_r($map, true));
+    return $map;
+}
+
+private
+function captureFulfillment($order, $fulfillment)
+{
+    $this->logger->addInfo("Capturing Fulfillment: ");
+    $this->logger->addInfo(print_r($fulfillment, true));
+    $this->logger->addInfo("Capturing for order " . $order->order_number);
+    if ($order->charge_amount >= $order->total) {
+        $this->logger->addInfo("order full amount has already been captured");
+        return false;
+    }
+    $subtotal = 0.00;
+    foreach ($fulfillment->items as $item) {
+        $subtotal += $item->price * $item->quantity;
+    }
+    $t_response = $this->acenda->post('taxdata/calculate', ['shipping_rate' => $order->shipping_rate, 'shipping_zip' => $order->shipping_zip, 'subtotal' => $subtotal]);
+    if ($t_response->code >= 200 && $t_response->code < 300) {
+
+        $total = $subtotal + $t_response->body->result->tax;
+        if ($total >= $order->charge_amount) {
+            $total = $order->total - $order->charge_amount;
         }
-        $t_response = $this->acenda->post('taxdata/calculate', ['shipping_rate' => $order->shipping_rate, 'shipping_zip' => $order->shipping_zip, 'subtotal' => $subtotal]);
-        if ($t_response->code >= 200 && $t_response->code < 300) {
-
-            $total = $subtotal + $t_response->body->result->tax;
-            if ($total >= $order->charge_amount) {
-                $total = $order->total - $order->charge_amount;
-            }
-            $this->logger->addInfo("total: " . number_format($total));
-            $c_response = $this->acenda->post('order/' . $order->id . '/delaycapture', ['amount' => $total]);
-            if ($c_response->code >= 200 && $c_response->code < 300) {
-                $this->logger->addInfo("capture successful!");
-                return true;
-            } else {
-                echo "capture failed\n";
-                print_r($c_response);
-                $this->logger->addError("Request to acenda hit 'Capture Failed' silent return. Logging the actual response");
-                $this->logger->addError(print_r($c_response, true));
-                return false;
-            }
-
+        $this->logger->addInfo("total: " . number_format($total));
+        $c_response = $this->acenda->post('order/' . $order->id . '/delaycapture', ['amount' => $total]);
+        if ($c_response->code >= 200 && $c_response->code < 300) {
+            $this->logger->addInfo("capture successful!");
+            return true;
         } else {
-            // tax calculate failed
-            // How the hell can you assume this? What about throttle?
+            echo "capture failed\n";
+            print_r($c_response);
             $this->logger->addError("Request to acenda hit 'Capture Failed' silent return. Logging the actual response");
-            $this->logger->addError(print_r($t_response, true));
+            $this->logger->addError(print_r($c_response, true));
             return false;
         }
+
+    } else {
+        // tax calculate failed
+        // How the hell can you assume this? What about throttle?
+        $this->logger->addError("Request to acenda hit 'Capture Failed' silent return. Logging the actual response");
+        $this->logger->addError(print_r($t_response, true));
+        return false;
+    }
+}
+
+private
+function renameFile($oldFilename, $newFilename)
+{
+    $this->logger->addInfo("renaming $oldFilename to $newFilename");
+    $protocol = $this->protocol;
+    switch (strtolower($protocol)) {
+        case 'sftp':
+            $ret = $this->renameFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'], $oldFilename, $newFilename);
+            break;
+        case 'ftp':
+            $ret = $this->renameFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'], $oldFilename, $newFilename);
+            break;
+        default:
+            $ret = false;
+            break;
     }
 
-    private function renameFile($oldFilename, $newFilename)
-    {
-        $this->logger->addInfo("renaming $oldFilename to $newFilename");
-        $protocol = $this->protocol;
-        switch (strtolower($protocol)) {
-            case 'sftp':
-                $ret = $this->renameFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'], $oldFilename, $newFilename);
-                break;
-            case 'ftp':
-                $ret = $this->renameFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'], $oldFilename, $newFilename);
-                break;
-            default:
-                $ret = false;
-                break;
-        }
+    return $ret;
+}
 
-        return $ret;
-    }
+private
+function renameFileSftp($url, $oldFilename, $newFilename)
+{
 
-    private function renameFileSftp($url, $oldFilename, $newFilename)
-    {
+    $this->sftp = new SFTP($this->host);
+    if (!$this->sftp->login($this->username, $this->password)) {
+        array_push($this->errors, 'could not connect via sftp - ' . $url);
+        $this->logger->addError('could not connect via sftp - ' . $url);
+        return false;
+    };
+    $this->sftp->chdir($this->remote_path);
+    return $this->sftp->rename($oldFilename, $newFilename);
+}
 
-        $this->sftp = new SFTP($this->host);
-        if (!$this->sftp->login($this->username, $this->password)) {
-            array_push($this->errors, 'could not connect via sftp - ' . $url);
-            $this->logger->addError('could not connect via sftp - ' . $url);
-            return false;
-        };
-        $this->sftp->chdir($this->remote_path);
-        return $this->sftp->rename($oldFilename, $newFilename);
-    }
+// This function check the file and rewrite the file in local under UNIX code
 
-    // This function check the file and rewrite the file in local under UNIX code
+private
+function renameFileFtp($url, $oldFilename, $newFilename)
+{
+    $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
+    if (!ftp_login($conn_id, $this->username, $this->password)) {
+        array_push($this->errors, 'could not connect via ftp - ' . $url);
+        $this->logger->addError('could not connect via ftp - ' . $url);
+        return false;
+    };
+    ftp_pasv($conn_id, true);
+    @ftp_chdir($conn_id, ($this->remote_path[0] == '/') ? substr($this->remote_path, 1) : $this->remote_path);
+    return ftp_rename($conn_id, $oldFilename, $newFilename);
+}
 
-    private function renameFileFtp($url, $oldFilename, $newFilename)
-    {
-        $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
-        if (!ftp_login($conn_id, $this->username, $this->password)) {
-            array_push($this->errors, 'could not connect via ftp - ' . $url);
-            $this->logger->addError('could not connect via ftp - ' . $url);
-            return false;
-        };
-        ftp_pasv($conn_id, true);
-        @ftp_chdir($conn_id, ($this->remote_path[0] == '/') ? substr($this->remote_path, 1) : $this->remote_path);
-        return ftp_rename($conn_id, $oldFilename, $newFilename);
-    }
+/**
+ * @todo This doesn't do anything.
+ */
+private
+function handleErrors()
+{
+    $return = $this->acenda->post("/log", [
+        'type' => 'url_based_import',
+        'type_id' => $this->configs['acenda']['service']['id'],
+        'data' => json_encode($this->errors)
+    ]);
+    print_r($return);
+    $this->logger->addError(print_r($return, true));
+}
 
-    /**
-     * @todo This doesn't do anything.
-     */
-    private function handleErrors()
-    {
-        $return = $this->acenda->post("/log", [
-            'type' => 'url_based_import',
-            'type_id' => $this->configs['acenda']['service']['id'],
-            'data' => json_encode($this->errors)
-        ]);
-        print_r($return);
-        $this->logger->addError(print_r($return, true));
-    }
-
-    public function process()
-    {
-        $this->setup();
-        $files = $this->getFileList();
-        if (is_array($files)) {
-            foreach ($files as $file) {
-                /*
-                 * This checks for a prefix
-                 */
-                if ($this->prefix && substr($file, 0, strlen($this->prefix)) != $this->prefix) {
-                    continue;
-                }
-                if (strtolower(pathinfo($file, PATHINFO_EXTENSION)) !== 'csv') {
-                    continue;
-                }
-                $this->logger->addInfo("getting " . $file);
-                // Why does getFile not return the file?
-                $this->getFile($file);
+public
+function process()
+{
+    $this->setup();
+    $files = $this->getFileList();
+    if (is_array($files)) {
+        foreach ($files as $file) {
+            /*
+             * This checks for a prefix
+             */
+            if ($this->prefix && substr($file, 0, strlen($this->prefix)) != $this->prefix) {
+                continue;
             }
+            if (strtolower(pathinfo($file, PATHINFO_EXTENSION)) !== 'csv') {
+                continue;
+            }
+            $this->logger->addInfo("getting " . $file);
+            // Why does getFile not return the file?
+            $this->getFile($file);
         }
-        $this->handleErrors();
+    }
+    $this->handleErrors();
 
-        $this->logger->addInfo("End LastRunTime: " . date("Y-m-d H:i:s", LastRunTime::getCurrentTimestamp()));
-        $this->lastRunTime->setDatetime('lastTime', LastRunTime::getCurrentTimestamp());
+    $this->logger->addInfo("End LastRunTime: " . date("Y-m-d H:i:s", LastRunTime::getCurrentTimestamp()));
+    $this->lastRunTime->setDatetime('lastTime', LastRunTime::getCurrentTimestamp());
+}
+
+private
+function getFileList()
+{
+    $protocol = $this->protocol;
+    $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
+    switch (strtolower($protocol)) {
+        case 'sftp':
+            $files = $this->getFileListSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
+            break;
+        case 'ftp':
+            $files = $this->getFileListFtp($this->configs['acenda']['subscription']['credentials']['file_url']);
+            break;
+        default:
+            $files = false;
+            break;
     }
 
-    private function getFileList()
-    {
-        $protocol = $this->protocol;
-        $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
-        switch (strtolower($protocol)) {
-            case 'sftp':
-                $files = $this->getFileListSftp($this->configs['acenda']['subscription']['credentials']['file_url']);
-                break;
-            case 'ftp':
-                $files = $this->getFileListFtp($this->configs['acenda']['subscription']['credentials']['file_url']);
-                break;
-            default:
-                $files = false;
-                break;
-        }
+    return $files;
+}
 
-        return $files;
-    }
+private
+function getFileListSftp($url)
+{
 
-    private function getFileListSftp($url)
-    {
+    $this->sftp = new SFTP($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 22);
+    if (!$this->sftp->login($this->username, $this->password)) {
+        array_push($this->errors, 'could not connect via sftp - ' . $url);
+        $this->logger->addError('could not connect via sftp - ' . $url);
+        return false;
+    };
+    $files = $this->sftp->nlist(@$this->remote_path ? $this->remote_path : '.');
+    return $files;
+}
 
-        $this->sftp = new SFTP($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 22);
-        if (!$this->sftp->login($this->username, $this->password)) {
-            array_push($this->errors, 'could not connect via sftp - ' . $url);
-            $this->logger->addError('could not connect via sftp - ' . $url);
-            return false;
-        };
-        $files = $this->sftp->nlist(@$this->remote_path ? $this->remote_path : '.');
-        return $files;
-    }
-
-    private function getFileListFtp($url)
-    {
-        $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
-        $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
-        if (ftp_login($conn_id, $this->username, $this->password)) {
-            ftp_pasv($conn_id, true);
-            $contents = ftp_nlist($conn_id, @$this->remote_path ? $this->remote_path : '.');
+private
+function getFileListFtp($url)
+{
+    $this->logger->addInfo("connecting to " . $this->host . "\nwith " . $this->username . ":" . $this->password);
+    $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
+    if (ftp_login($conn_id, $this->username, $this->password)) {
+        ftp_pasv($conn_id, true);
+        $contents = ftp_nlist($conn_id, @$this->remote_path ? $this->remote_path : '.');
 //            print_r($contents);
-            return $contents;
-        } else {
-            array_push($this->errors, 'could not connect via ftp - ' . $url);
-            $this->logger->addError('could not connect via ftp - ' . $url);
-            return false;
-        }
+        return $contents;
+    } else {
+        array_push($this->errors, 'could not connect via ftp - ' . $url);
+        $this->logger->addError('could not connect via ftp - ' . $url);
+        return false;
     }
+}
 
-    private function getFile($filename)
-    {
-        $protocol = $this->protocol;
-        switch (strtolower($protocol)) {
-            case 'sftp':
-                $resp = $this->getFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
+private
+function getFile($filename)
+{
+    $protocol = $this->protocol;
+    switch (strtolower($protocol)) {
+        case 'sftp':
+            $resp = $this->getFileSftp($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
+            break;
+        case 'ftp':
+            $resp = $this->getFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
+            break;
+        default:
+            $resp = false;
+            break;
+    }
+    if ($resp) {
+        $info = pathinfo($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
+        switch (strtolower($info["extension"])) {
+            case "csv":
+                $this->CSVFileCheck('/tmp/' . $filename);
                 break;
-            case 'ftp':
-                $resp = $this->getFileFtp($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
+            case "zip":
+                $this->UnzipFile($info);
                 break;
             default:
-                $resp = false;
+                array_push($this->errors, "The extension " . $info['extension'] . " is not allowed for the moment.");
+                $this->logger->addError("The extension " . $info['extension'] . " is not allowed for the moment.");
                 break;
         }
-        if ($resp) {
-            $info = pathinfo($this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename);
-            switch (strtolower($info["extension"])) {
-                case "csv":
-                    $this->CSVFileCheck('/tmp/' . $filename);
-                    break;
-                case "zip":
-                    $this->UnzipFile($info);
-                    break;
-                default:
-                    array_push($this->errors, "The extension " . $info['extension'] . " is not allowed for the moment.");
-                    $this->logger->addError("The extension " . $info['extension'] . " is not allowed for the moment.");
-                    break;
-            }
-        } else {
-            array_push($this->errors, "The file provided at the URL " . $this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename . " couldn't be reached.");
-            $this->logger->addError("The file provided at the URL " . $this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename . " couldn't be reached.");
-        }
+    } else {
+        array_push($this->errors, "The file provided at the URL " . $this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename . " couldn't be reached.");
+        $this->logger->addError("The file provided at the URL " . $this->configs['acenda']['subscription']['credentials']['file_url'] . '/' . $filename . " couldn't be reached.");
+    }
+}
+
+private
+function getFileSftp($url)
+{
+
+    $this->sftp = new SFTP($this->host);
+    if (!$this->sftp->login($this->username, $this->password)) {
+        array_push($this->errors, 'could not connect via sftp - ' . $url);
+        $this->logger->addError('could not connect via sftp - ' . $url);
+        return false;
+    };
+    $this->sftp->chdir($this->remote_path);
+    $data = $this->sftp->get(basename($url));
+    return @file_put_contents('/tmp/' . basename($url), $data);
+}
+
+private
+function getFileFtp($url)
+{
+    $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
+    if (!ftp_login($conn_id, $this->username, $this->password)) {
+        array_push($this->errors, 'could not connect via ftp - ' . $url);
+        $this->logger->addError('could not connect via ftp - ' . $url);
+        return false;
+    };
+    ftp_pasv($conn_id, true);
+    @ftp_chdir($conn_id, ($this->remote_path[0] == '/') ? substr($this->remote_path, 1) : $this->remote_path);
+    return ftp_get($conn_id, '/tmp/' . basename($url), basename($url), FTP_ASCII);
+}
+
+private
+function CSVFileCheck($path_to_file)
+{
+    ini_set("auto_detect_line_endings", true);
+    $this->filename = basename($path_to_file);
+    $this->path = "/tmp/" . uniqid() . ".csv";
+    $fd_read = fopen($path_to_file, "r");
+    $fd_write = fopen($this->path, "w");
+
+    while ($line = fgetcsv($fd_read)) {
+        fputcsv($fd_write, $line);
     }
 
-    private function getFileSftp($url)
-    {
+    fclose($fd_read);
+    fclose($fd_write);
 
-        $this->sftp = new SFTP($this->host);
-        if (!$this->sftp->login($this->username, $this->password)) {
-            array_push($this->errors, 'could not connect via sftp - ' . $url);
-            $this->logger->addError('could not connect via sftp - ' . $url);
-            return false;
-        };
-        $this->sftp->chdir($this->remote_path);
-        $data = $this->sftp->get(basename($url));
-        return @file_put_contents('/tmp/' . basename($url), $data);
-    }
+    $this->processFile();
+}
 
-    private function getFileFtp($url)
-    {
-        $conn_id = ftp_connect($this->host, @$this->urlParts['port'] ? $this->urlParts['port'] : 21);
-        if (!ftp_login($conn_id, $this->username, $this->password)) {
-            array_push($this->errors, 'could not connect via ftp - ' . $url);
-            $this->logger->addError('could not connect via ftp - ' . $url);
-            return false;
-        };
-        ftp_pasv($conn_id, true);
-        @ftp_chdir($conn_id, ($this->remote_path[0] == '/') ? substr($this->remote_path, 1) : $this->remote_path);
-        return ftp_get($conn_id, '/tmp/' . basename($url), basename($url), FTP_ASCII);
-    }
-
-    private function CSVFileCheck($path_to_file)
-    {
-        ini_set("auto_detect_line_endings", true);
-        $this->filename = basename($path_to_file);
-        $this->path = "/tmp/" . uniqid() . ".csv";
-        $fd_read = fopen($path_to_file, "r");
-        $fd_write = fopen($this->path, "w");
-
-        while ($line = fgetcsv($fd_read)) {
-            fputcsv($fd_write, $line);
-        }
-
-        fclose($fd_read);
-        fclose($fd_write);
-
-        $this->processFile();
-    }
-
-    private function UnzipFile($info)
-    {
-        $where = '/tmp/' . $info['filename'];
-        //@todo Commenting this out, due to $c not being defined. BA - 8.29.16
+private
+function UnzipFile($info)
+{
+    $where = '/tmp/' . $info['filename'];
+    //@todo Commenting this out, due to $c not being defined. BA - 8.29.16
 //        file_put_contents($where, $c);
 
-        if (\Comodojo\Zip\Zip::check($where)) {
-            $zip = \Comodojo\Zip\Zip::open($where);
-            $where = '/tmp/' . uniqid();
-            $zip->extract($where);
+    if (\Comodojo\Zip\Zip::check($where)) {
+        $zip = \Comodojo\Zip\Zip::open($where);
+        $where = '/tmp/' . uniqid();
+        $zip->extract($where);
 
-            if (is_dir($where)) {
-                $directories = scandir($where);
-                foreach ($directories as $dir) {
-                    if ($dir != "." && $dir != "..") {
-                        $i = pathinfo($where . "/" . $dir);
-                        if (isset($i['extension']) && strtolower($i['extension']) === 'csv') {
-                            $this->CSVFileCheck($where . "/" . $dir);
-                        } else {
-                            array_push($this->errors, "A file in the extracted folder (" . $i['filename'] . ") is not valid.");
-                            $this->logger->addError("A file in the extracted folder (" . $i['filename'] . ") is not valid.");
-                        }
+        if (is_dir($where)) {
+            $directories = scandir($where);
+            foreach ($directories as $dir) {
+                if ($dir != "." && $dir != "..") {
+                    $i = pathinfo($where . "/" . $dir);
+                    if (isset($i['extension']) && strtolower($i['extension']) === 'csv') {
+                        $this->CSVFileCheck($where . "/" . $dir);
+                    } else {
+                        array_push($this->errors, "A file in the extracted folder (" . $i['filename'] . ") is not valid.");
+                        $this->logger->addError("A file in the extracted folder (" . $i['filename'] . ") is not valid.");
                     }
-                }
-            } else {
-                $i = pathinfo($where);
-                if (strtolower($i['extension']) === 'csv') {
-                    $this->checkFileFromZip($where);
-                } else {
-                    array_push($this->errors, "The file extracted is not a proper CSV file (" . $i['extension'] . ").");
-                    $this->logger->addError("The file extracted is not a proper CSV file (" . $i['extension'] . ").");
                 }
             }
         } else {
-            array_push($this->errors, "The ZIP file provided seems corrupted (" . $where . ").");
-            $this->logger->addError("The ZIP file provided seems corrupted (" . $where . ").");
+            $i = pathinfo($where);
+            if (strtolower($i['extension']) === 'csv') {
+                $this->checkFileFromZip($where);
+            } else {
+                array_push($this->errors, "The file extracted is not a proper CSV file (" . $i['extension'] . ").");
+                $this->logger->addError("The file extracted is not a proper CSV file (" . $i['extension'] . ").");
+            }
         }
+    } else {
+        array_push($this->errors, "The ZIP file provided seems corrupted (" . $where . ").");
+        $this->logger->addError("The ZIP file provided seems corrupted (" . $where . ").");
     }
+}
 
-    private function generateUrl()
-    {
-        $url = "";
-        switch (isset($_SERVER['ACENDA_MODE']) ? $_SERVER['ACENDA_MODE'] : null) {
-            case "acendavm":
-                $url = "http://admin.acendev";
-                break;
-            case "development":
-                $url = "https://admin.acenda.devserver";
-                break;
-            default:
-                $url = "https://admin.acenda.com";
-                break;
-        }
-        return $url . "/preview/" . md5($this->configs['acenda']['store']['name']) . "/api/import/upload?access_token=" . Acenda\Authentication::getToken();
+private
+function generateUrl()
+{
+    $url = "";
+    switch (isset($_SERVER['ACENDA_MODE']) ? $_SERVER['ACENDA_MODE'] : null) {
+        case "acendavm":
+            $url = "http://admin.acendev";
+            break;
+        case "development":
+            $url = "https://admin.acenda.devserver";
+            break;
+        default:
+            $url = "https://admin.acenda.com";
+            break;
     }
+    return $url . "/preview/" . md5($this->configs['acenda']['store']['name']) . "/api/import/upload?access_token=" . Acenda\Authentication::getToken();
+}
 
 
 }
